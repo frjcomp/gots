@@ -65,23 +65,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ github.ref_name }}
         run: |
-          binst init --source=goreleaser --file=.goreleaser.yaml --repo frjcomp/golang-https-rev --name golang-https-rev -o .config/binstaller.yml
+          mkdir -p public
 
           # Listener installer
-          mkdir -p public
-          cp .config/binstaller.yml .config/binstaller-listener.yml
           binst embed-checksums --config .config/binstaller-listener.yml --version "$VERSION" --mode download
           binst gen --config .config/binstaller-listener.yml --target-version "$VERSION" -o public/install-listener.sh
-          sed -i "s/BINARY_NAME='golang-https-rev'/BINARY_NAME='listener'/g" public/install-listener.sh
-          sed -i 's|BINARY_PATH="\${TMPDIR}/golang-https-rev"|BINARY_PATH="${TMPDIR}/listener"|' public/install-listener.sh
+          sed -i "s/BINARY_NAME='golang-https-rev'/BINARY_NAME='listener'/g; s|BINARY_PATH=\\\"\${TMPDIR}/golang-https-rev\\\"|BINARY_PATH=\\\"\${TMPDIR}/listener\\\"|" public/install-listener.sh
 
           # Reverse installer
-          cp .config/binstaller.yml .config/binstaller-reverse.yml
-          sed -i 's/template: \${NAME}_listener_/template: ${NAME}_reverse_/' .config/binstaller-reverse.yml
           binst embed-checksums --config .config/binstaller-reverse.yml --version "$VERSION" --mode download
           binst gen --config .config/binstaller-reverse.yml --target-version "$VERSION" -o public/install-reverse.sh
-          sed -i "s/BINARY_NAME='golang-https-rev'/BINARY_NAME='reverse'/g" public/install-reverse.sh
-          sed -i 's|BINARY_PATH="\${TMPDIR}/golang-https-rev"|BINARY_PATH="${TMPDIR}/reverse"|' public/install-reverse.sh
+          sed -i "s/BINARY_NAME='golang-https-rev'/BINARY_NAME='reverse'/g; s|BINARY_PATH=\\\"\${TMPDIR}/golang-https-rev\\\"|BINARY_PATH=\\\"\${TMPDIR}/reverse\\\"|" public/install-reverse.sh
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
