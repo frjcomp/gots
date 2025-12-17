@@ -68,13 +68,15 @@ jobs:
           mkdir -p public
 
           # Listener installer
-          binst embed-checksums --config .config/binstaller-listener.yml --version "$VERSION" --mode download
-          binst gen --config .config/binstaller-listener.yml --target-version "$VERSION" -o public/install-listener.sh
+          cp .config/binstaller-listener.yml /tmp/binstaller-listener.yml
+          binst embed-checksums --config /tmp/binstaller-listener.yml --version "$VERSION" --mode download
+          binst gen --config /tmp/binstaller-listener.yml --target-version "$VERSION" -o public/install-listener.sh
           sed -i "s/BINARY_NAME='golang-https-rev'/BINARY_NAME='listener'/g; s|BINARY_PATH=\\\"\${TMPDIR}/golang-https-rev\\\"|BINARY_PATH=\\\"\${TMPDIR}/listener\\\"|" public/install-listener.sh
 
           # Reverse installer
-          binst embed-checksums --config .config/binstaller-reverse.yml --version "$VERSION" --mode download
-          binst gen --config .config/binstaller-reverse.yml --target-version "$VERSION" -o public/install-reverse.sh
+          cp .config/binstaller-reverse.yml /tmp/binstaller-reverse.yml
+          binst embed-checksums --config /tmp/binstaller-reverse.yml --version "$VERSION" --mode download
+          binst gen --config /tmp/binstaller-reverse.yml --target-version "$VERSION" -o public/install-reverse.sh
           sed -i "s/BINARY_NAME='golang-https-rev'/BINARY_NAME='reverse'/g; s|BINARY_PATH=\\\"\${TMPDIR}/golang-https-rev\\\"|BINARY_PATH=\\\"\${TMPDIR}/reverse\\\"|" public/install-reverse.sh
 
       - name: Upload Pages artifact
