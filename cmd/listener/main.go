@@ -80,47 +80,97 @@ func decompressHex(payload string) ([]byte, error) {
 	return io.ReadAll(gz)
 }
 
-func filenameCompleter(line string) []string {
-	// Extract the last word (potential partial filename)
-	parts := strings.Fields(line)
-	if len(parts) == 0 {
-		return []string{}
-	}
+func parseFileList(lsOutput string, prefix string) []string {
+	var completions []string
+	lines := strings.Split(lsOutput, "\n")
+	for _, line := range lines {
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		// ls -la output: last field is filename
+		filename := fields[len(fields)-1]
 
-	prefix := parts[len(parts)-1]
-
-	// For upload/download, only complete filenames in the last argument
-	if strings.HasPrefix(line, "upload ") || strings.HasPrefix(line, "download ") {
-		matches, err := filepath.Glob(prefix + "*")
-		if err != nil {
-			return []string{}
+		// Skip . and ..
+		if filename == "." || filename == ".." {
+			continue
 		}
 
-		var completions []string
-		for _, match := range matches {
-			// Return basename and add trailing / for directories
-			info, err := os.Stat(match)
-			if err != nil {
-				continue
-			}
-			if info.IsDir() {
-				completions = append(completions, match+"/")
-			} else {
-				completions = append(completions, match)
-			}
+		// Match prefix
+		if !strings.HasPrefix(filename, prefix) {
+			continue
 		}
-		return completions
-	}
 
-	return []string{}
+		// Check if it's a directory by looking for 'd' in the first field
+		if len(fields[0]) > 0 && fields[0][0] == 'd' {
+			completions = append(completions, filename+"/")
+		} else {
+			completions = append(completions, filename)
+		}
+	}
+	return completions
 }
 
 func interactiveShell(l *server.Listener) {
 	line := liner.NewLiner()
 	line.SetCtrlCAborts(true)
 	defer line.Close()
-	line.SetCompleter(func(l string) []string {
-		return filenameCompleter(l)
+
+	var currentClient string
+
+	line.SetCompleter(func(input string) []string {
+		parts := strings.Fields(input)
+		if len(parts) == 0 {
+			return []string{}
+		}
+
+		prefix := parts[len(parts)-1]
+		cmd := parts[0]
+
+		// Handle remote file completion for download/upload when in a session
+		if currentClient != "" && (cmd == "download" || cmd == "upload") {
+			// Determine which argument we're completing
+			argNum := len(parts) - 1
+
+			// For download: first arg is remote, second is local
+			// For upload: first arg is local, second is remote
+			isRemote := (cmd == "download" && argNum == 1) || (cmd == "upload" && argNum == 2)
+
+			if isRemote {
+				// Fetch remote file list via ls command
+				if err := l.SendCommand(currentClient, "ls -la"); err == nil {
+					resp, err := l.GetResponse(currentClient, 5000000000)
+					if err == nil {
+						resp = strings.ReplaceAll(resp, "<<<END_OF_OUTPUT>>>", "")
+						files := parseFileList(resp, prefix)
+						return files
+					}
+				}
+				return []string{}
+			}
+
+			// For local paths, use glob
+			matches, err := filepath.Glob(prefix + "*")
+			if err != nil {
+				return []string{}
+			}
+
+			var completions []string
+			for _, match := range matches {
+				info, err := os.Stat(match)
+				if err != nil {
+					continue
+				}
+				if info.IsDir() {
+					completions = append(completions, match+"/")
+				} else {
+					completions = append(completions, match)
+				}
+			}
+			return completions
+		}
+
+		return []string{}
 	})
 
 	fmt.Println("\n=== GOTS - PIPELEEK ===")
@@ -132,8 +182,6 @@ func interactiveShell(l *server.Listener) {
 	fmt.Println("  bg                   - Return to listener prompt from a session")
 	fmt.Println("  exit                 - Exit the listener")
 	fmt.Println()
-
-	var currentClient string
 
 	for {
 		prompt := "listener> "
