@@ -4,9 +4,9 @@
 # GoReleaser output
 /dist/
 
-# Compiled binaries (root; legacy)
-/listener
-/reverse
+# Compiled binaries (root)
+/gotsl
+/gotsr
 
 # Go build artifacts
 *.exe
