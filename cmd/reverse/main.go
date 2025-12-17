@@ -23,7 +23,7 @@ func main() {
 	maxRetries := 0
 	fmt.Sscanf(os.Args[2], "%d", &maxRetries)
 
-	log.Printf("Starting reverse shell client...")
+	log.Printf("Starting GOTS - PIPELEEK client...")
 	log.Printf("Version: %s (commit %s, date %s)", version.Version, version.Commit, version.Date)
 	log.Printf("Target: %s", target)
 	log.Printf("Max retries: %d (0 = infinite)", maxRetries)

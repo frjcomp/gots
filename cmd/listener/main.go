@@ -53,7 +53,7 @@ func main() {
 func interactiveShell(l *server.Listener) {
 	reader := bufio.NewReader(os.Stdin)
 
-	fmt.Println("\n=== Reverse Shell Listener ===")
+	fmt.Println("\n=== GOTS - PIPELEEK ===")
 	fmt.Println("Commands:")
 	fmt.Println("  ls                   - List connected clients")
 	fmt.Println("  use <client_id>      - Interact with a specific client")
