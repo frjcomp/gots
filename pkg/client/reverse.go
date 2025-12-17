@@ -132,6 +132,13 @@ func (rc *ReverseClient) HandleCommands() error {
 			continue
 		}
 
+		// Handle keepalive ping
+		if command == "PING" {
+			rc.writer.WriteString("PONG\n<<<END_OF_OUTPUT>>>\n")
+			rc.writer.Flush()
+			continue
+		}
+
 		log.Printf("Received command: %s", command)
 
 		if command == "exit" {
