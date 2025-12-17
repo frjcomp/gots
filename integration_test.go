@@ -31,7 +31,7 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 
     listener := startProcess(ctx, t, listenerBin, port, "127.0.0.1")
     t.Cleanup(listener.stop)
-    waitForContains(t, listener, "Reverse Shell Listener", 10*time.Second)
+    waitForContains(t, listener, "Listener ready. Waiting for connections", 10*time.Second)
 
     reverse := startProcess(ctx, t, reverseBin, fmt.Sprintf("127.0.0.1:%s", port), "1")
     t.Cleanup(reverse.stop)
@@ -47,14 +47,12 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 
     // Run ls on the client and ensure both sides see activity.
     send(listener, "ls\n")
-    waitForContains(t, listener, "<<<END_OF_OUTPUT>>>", 5*time.Second)
     waitForContains(t, listener, "go.mod", 5*time.Second)
     waitForContains(t, reverse, "Received command: ls", 5*time.Second)
 
     // Run whoami on the client and assert output on both sides.
     user := currentUser(t)
     send(listener, "whoami\n")
-    waitForContains(t, listener, "<<<END_OF_OUTPUT>>>", 5*time.Second)
     waitForContains(t, listener, user, 5*time.Second)
     waitForContains(t, reverse, "Received command: whoami", 5*time.Second)
 

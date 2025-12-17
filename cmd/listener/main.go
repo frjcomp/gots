@@ -143,8 +143,9 @@ func interactiveShell(l *server.Listener) {
 				continue
 			}
 
-			fmt.Print(resp)
-			if !strings.HasSuffix(resp, "\n") {
+			clean := strings.ReplaceAll(resp, "<<<END_OF_OUTPUT>>>", "")
+			fmt.Print(clean)
+			if !strings.HasSuffix(clean, "\n") {
 				fmt.Println()
 			}
 		}
