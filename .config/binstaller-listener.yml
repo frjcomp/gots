@@ -1,0 +1,55 @@
+schema: v1
+name: golang-https-rev
+repo: frjcomp/golang-https-rev
+asset:
+    template: ${NAME}_listener_${OS}_${ARCH}${EXT}
+    default_extension: .tar.gz
+    rules:
+        - when:
+            os: windows
+          ext: .zip
+    naming_convention:
+        os: lowercase
+        arch: lowercase
+checksums:
+    algorithm: sha256
+    template: checksums.txt
+    embedded_checksums:
+      v0.4.0:
+      - filename: golang-https-rev_listener_darwin_amd64.tar.gz
+        hash: 01538b682a86cbf8173190ff308e1b87fadcc26de632ba25b27b8381a8f0d202
+      - filename: golang-https-rev_listener_darwin_arm64.tar.gz
+        hash: fa6bd3501cd010831d096f9f9249e492dbfa51b1e169d1ac29f024c266640b48
+      - filename: golang-https-rev_listener_linux_amd64.tar.gz
+        hash: 0075c66be35e4a8c236a51e8ea36b36400dbd2b5e5e71940d99ff3627a65355e
+      - filename: golang-https-rev_listener_linux_arm64.tar.gz
+        hash: b4adeab287cdd68735afb8d0e4122e6357cf98ce4dcfddce634ffba62a992b56
+      - filename: golang-https-rev_listener_windows_amd64.zip
+        hash: c9ff9df2243cf412b7b97974beed2e51800221d746446d26661cf8b0f7547258
+      - filename: golang-https-rev_listener_windows_arm64.zip
+        hash: 7df553851e24f3634ee147057204866c3c90b508be4242e3f53772f56e7511a3
+      - filename: golang-https-rev_reverse_darwin_amd64.tar.gz
+        hash: b7334372b0baeeaaee38191631a8a377727d4ed4b75f86f9a051fed5d24b9bb2
+      - filename: golang-https-rev_reverse_darwin_arm64.tar.gz
+        hash: 1f1b1b551c44bf35ad3630509ee9824908112ec8feb8683f94442d7ff5c11636
+      - filename: golang-https-rev_reverse_linux_amd64.tar.gz
+        hash: a159f4b35d34c088e6e5a70ed4869724748499d20f7ef7fb7c74b1b1b38af329
+      - filename: golang-https-rev_reverse_linux_arm64.tar.gz
+        hash: 6d5ab04bd01a1078ad2fde662b870280c9ca54dc5db8e4ac0839013ccb971796
+      - filename: golang-https-rev_reverse_windows_amd64.zip
+        hash: e9361d3c3fe3f27d84026e5b26ae4407a0fe8fe260fbf9f73ef591103780eedb
+      - filename: golang-https-rev_reverse_windows_arm64.zip
+        hash: 80e4d7bd1a9623aeca97a7047b5c2130c7f7aa758232776c18f9ee75bdd7b31f
+supported_platforms:
+    - os: darwin
+      arch: amd64
+    - os: darwin
+      arch: arm64
+    - os: linux
+      arch: amd64
+    - os: linux
+      arch: arm64
+    - os: windows
+      arch: amd64
+    - os: windows
+      arch: arm64
