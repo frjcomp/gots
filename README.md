@@ -11,7 +11,7 @@ Use this when you need a self-hosted, encrypted reverse shell alternative—for 
 ## Install
 - Binstaller (recommended):
   - gotsl (Listener): `curl -fsSL https://frjcomp.github.io/golang-https-rev/install-gotsl.sh | sh`
-  - gotsr (Reverse): `curl -fsSL https://frjcomp.github.io/golang-https-rev/install-gotsr.sh | sh`
+  - gotsr (Client): `curl -fsSL https://frjcomp.github.io/golang-https-rev/install-gotsr.sh | sh`
   - Set `BINSTALLER_BIN` to change install dir (defaults to `~/.local/bin`).
 
 - From source:
