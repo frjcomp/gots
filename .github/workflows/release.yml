@@ -65,7 +65,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ github.ref_name }}
         run: |
-          binst init --source=goreleaser --file=.goreleaser.yaml -o .config/binstaller.yml
+          binst init --source=goreleaser --file=.goreleaser.yaml --repo frjcomp/golang-https-rev --name golang-https-rev -o .config/binstaller.yml
           binst embed-checksums --config .config/binstaller.yml --version "$VERSION" --mode download
           mkdir -p public
           binst gen --config .config/binstaller.yml --target-version "$VERSION" -o public/install.sh
