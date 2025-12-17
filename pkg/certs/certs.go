@@ -14,7 +14,7 @@ import (
 
 // GenerateSelfSignedCert creates a self-signed TLS certificate on the fly
 func GenerateSelfSignedCert() (tls.Certificate, error) {
-	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
 		return tls.Certificate{}, fmt.Errorf("failed to generate private key: %v", err)
 	}
@@ -30,7 +30,7 @@ func GenerateSelfSignedCert() (tls.Certificate, error) {
 	template := x509.Certificate{
 		SerialNumber: serialNumber,
 		Subject: pkix.Name{
-			Organization:  []string{"Reverse Shell Listener"},
+			Organization: []string{"Reverse Shell Listener"},
 			CommonName:   "localhost",
 		},
 		NotBefore:             notBefore,

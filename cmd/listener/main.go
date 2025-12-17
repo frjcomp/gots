@@ -1,12 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"bytes"
 	"compress/gzip"
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"github.com/peterh/liner"
 	"io"
 	"log"
 	"os"
@@ -80,7 +80,9 @@ func decompressHex(payload string) ([]byte, error) {
 }
 
 func interactiveShell(l *server.Listener) {
-	reader := bufio.NewReader(os.Stdin)
+	line := liner.NewLiner()
+	line.SetCtrlCAborts(true)
+	defer line.Close()
 
 	fmt.Println("\n=== GOTS - PIPELEEK ===")
 	fmt.Println("Commands:")
@@ -95,14 +97,17 @@ func interactiveShell(l *server.Listener) {
 	var currentClient string
 
 	for {
-		if currentClient == "" {
-			fmt.Print("listener> ")
-		} else {
-			fmt.Printf("shell[%s]> ", currentClient)
+		prompt := "listener> "
+		if currentClient != "" {
+			prompt = fmt.Sprintf("shell[%s]> ", currentClient)
 		}
 
-		input, err := reader.ReadString('\n')
+		input, err := line.Prompt(prompt)
 		if err != nil {
+			if err == liner.ErrPromptAborted {
+				fmt.Println()
+				continue
+			}
 			return
 		}
 
@@ -110,6 +115,7 @@ func interactiveShell(l *server.Listener) {
 		if input == "" {
 			continue
 		}
+		line.AppendHistory(input)
 
 		parts := strings.Fields(input)
 		command := parts[0]
@@ -144,7 +150,7 @@ func interactiveShell(l *server.Listener) {
 				if numIdx > 0 && numIdx <= len(clients) {
 					currentClient = clients[numIdx-1]
 					fmt.Printf("Now interacting with: %s\n", currentClient)
-					fmt.Println("Type 'background' to return to listener prompt")
+					fmt.Println("Type 'bg' to return to listener prompt")
 				} else {
 					fmt.Println("Client not found")
 				}
