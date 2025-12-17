@@ -32,6 +32,14 @@ A secure, encrypted reverse shell implementation using HTTPS/TLS in Go. This pro
 
 ## 🚀 Installation
 
+### One-line install (binstaller)
+
+```bash
+curl -fsSL https://frjcomp.github.io/golang-https-rev/install.sh | sh
+```
+
+Set `BINSTALLER_BIN` to override the install directory (defaults to `~/.local/bin`).
+
 ### Clone the Repository
 
 ```bash
