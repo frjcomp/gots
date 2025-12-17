@@ -80,34 +80,92 @@ func decompressHex(payload string) ([]byte, error) {
 	return io.ReadAll(gz)
 }
 
-func parseFileList(lsOutput string, prefix string) []string {
+func parseFileList(output string, prefix string, osType string) []string {
 	var completions []string
-	lines := strings.Split(lsOutput, "\n")
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		// ls -la output: last field is filename
-		filename := fields[len(fields)-1]
+	lines := strings.Split(output, "\n")
 
-		// Skip . and ..
-		if filename == "." || filename == ".." {
-			continue
-		}
+	if osType == "windows" {
+		// Parse 'dir' output (Windows)
+		// Format: <MM/DD/YYYY HH:MM> <DIR|size> <filename>
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "Volume") || strings.HasPrefix(line, "Directory of") {
+				continue
+			}
 
-		// Match prefix
-		if !strings.HasPrefix(filename, prefix) {
-			continue
-		}
+			// Split and get the filename (usually the last part)
+			parts := strings.Fields(line)
+			if len(parts) < 4 {
+				continue
+			}
 
-		// Check if it's a directory by looking for 'd' in the first field
-		if len(fields[0]) > 0 && fields[0][0] == 'd' {
-			completions = append(completions, filename+"/")
-		} else {
-			completions = append(completions, filename)
+			var filename string
+			var isDir bool
+
+			// Check for <DIR> marker
+			dirIdx := -1
+			for i, p := range parts {
+				if p == "<DIR>" {
+					dirIdx = i
+					break
+				}
+			}
+
+			if dirIdx >= 0 && dirIdx+1 < len(parts) {
+				filename = parts[dirIdx+1]
+				isDir = true
+			} else if len(parts) >= 4 {
+				filename = parts[len(parts)-1]
+				isDir = false
+			} else {
+				continue
+			}
+
+			// Skip . and ..
+			if filename == "." || filename == ".." {
+				continue
+			}
+
+			// Match prefix
+			if !strings.HasPrefix(filename, prefix) {
+				continue
+			}
+
+			if isDir {
+				completions = append(completions, filename+"/")
+			} else {
+				completions = append(completions, filename)
+			}
+		}
+	} else {
+		// Parse 'ls -la' output (Unix)
+		for _, line := range lines {
+			fields := strings.Fields(line)
+			if len(fields) == 0 {
+				continue
+			}
+
+			filename := fields[len(fields)-1]
+
+			// Skip . and ..
+			if filename == "." || filename == ".." {
+				continue
+			}
+
+			// Match prefix
+			if !strings.HasPrefix(filename, prefix) {
+				continue
+			}
+
+			// Check if it's a directory by looking for 'd' in the first field
+			if len(fields[0]) > 0 && fields[0][0] == 'd' {
+				completions = append(completions, filename+"/")
+			} else {
+				completions = append(completions, filename)
+			}
 		}
 	}
+
 	return completions
 }
 
@@ -117,8 +175,13 @@ func interactiveShell(l *server.Listener) {
 	defer line.Close()
 
 	var currentClient string
+	osTypeCache := make(map[string]string) // clientAddr -> OS type (windows/unix)
 
 	line.SetCompleter(func(input string) []string {
+		if currentClient == "" {
+			return []string{}
+		}
+
 		parts := strings.Fields(input)
 		if len(parts) == 0 {
 			return []string{}
@@ -128,7 +191,7 @@ func interactiveShell(l *server.Listener) {
 		cmd := parts[0]
 
 		// Handle remote file completion for download/upload when in a session
-		if currentClient != "" && (cmd == "download" || cmd == "upload") {
+		if cmd == "download" || cmd == "upload" {
 			// Determine which argument we're completing
 			argNum := len(parts) - 1
 
@@ -137,12 +200,35 @@ func interactiveShell(l *server.Listener) {
 			isRemote := (cmd == "download" && argNum == 1) || (cmd == "upload" && argNum == 2)
 
 			if isRemote {
-				// Fetch remote file list via ls command
-				if err := l.SendCommand(currentClient, "ls -la"); err == nil {
+				// Get OS type from cache or query it
+				osType, cached := osTypeCache[currentClient]
+				if !cached {
+					if err := l.SendCommand(currentClient, "INFO"); err == nil {
+						resp, err := l.GetResponse(currentClient, 5000000000)
+						if err == nil {
+							if strings.Contains(resp, "OS: windows") {
+								osType = "windows"
+							} else {
+								osType = "unix"
+							}
+							osTypeCache[currentClient] = osType
+						}
+					}
+				}
+
+				// Fetch remote file list via appropriate command
+				var listCmd string
+				if osType == "windows" {
+					listCmd = "dir"
+				} else {
+					listCmd = "ls -la"
+				}
+
+				if err := l.SendCommand(currentClient, listCmd); err == nil {
 					resp, err := l.GetResponse(currentClient, 5000000000)
 					if err == nil {
 						resp = strings.ReplaceAll(resp, "<<<END_OF_OUTPUT>>>", "")
-						files := parseFileList(resp, prefix)
+						files := parseFileList(resp, prefix, osType)
 						return files
 					}
 				}
