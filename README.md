@@ -1,6 +1,8 @@
 # Golang TLS Reverse Shell (TCP)
 
-![pipeleek_gots](pipeleek_gots.svg)
+<div align="center">
+  <img src="pipeleek_gots.svg" alt="pipeleek_gots" width="200" />
+</div>
 
 Minimal, encrypted reverse shell over raw TCP with TLS.
 
