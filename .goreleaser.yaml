@@ -38,21 +38,21 @@ builds:
 
 archives:
   - id: listener-archive
-    builds:
+    ids:
       - listener
     name_template: "{{ .ProjectName }}_listener_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats: zip
   - id: reverse-archive
-    builds:
+    ids:
       - reverse
     name_template: "{{ .ProjectName }}_reverse_{{ .Os }}_{{ .Arch }}"
-    format: tar.gz
+    formats: tar.gz
     format_overrides:
       - goos: windows
-        format: zip
+        formats: zip
 
 checksum:
   name_template: "checksums.txt"
