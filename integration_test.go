@@ -29,9 +29,9 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 	defer cancel()
 
 	listenerBin := buildBinary(t, "gotsl", "./cmd/gotsl")
-	reverseBin := buildBinary(t, "reverse", "./cmd/reverse")
+	reverseBin := buildBinary(t, "gotsr", "./cmd/gotsr")
 
- 	listener := startProcess(ctx, t, listenerBin, port, "127.0.0.1")
+	listener := startProcess(ctx, t, listenerBin, port, "127.0.0.1")
 	t.Cleanup(listener.stop)
 	waitForContains(t, listener, "Listener ready. Waiting for connections", 10*time.Second)
 
@@ -114,7 +114,7 @@ func TestLinerHistoryFeature(t *testing.T) {
 	defer cancel()
 
 	listenerBin := buildBinary(t, "gotsl", "./cmd/gotsl")
-	reverseBin := buildBinary(t, "reverse", "./cmd/reverse")
+	reverseBin := buildBinary(t, "gotsr", "./cmd/gotsr")
 
 	listener := startProcess(ctx, t, listenerBin, port, "127.0.0.1")
 	t.Cleanup(listener.stop)

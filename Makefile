@@ -9,7 +9,7 @@ RETRIES ?= 0
 
 BIN_DIR := bin
 BIN_GOTSL    := $(BIN_DIR)/gotsl
-BIN_REVERSE  := $(BIN_DIR)/reverse
+BIN_GOTSR    := $(BIN_DIR)/gotsr
 
 # Version metadata
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
@@ -20,19 +20,19 @@ LDFLAGS := -s -w \
 	-X golang-https-rev/pkg/version.Commit=$(COMMIT) \
 	-X golang-https-rev/pkg/version.Date=$(DATE)
 
-.PHONY: all help build test fmt vet clean run-gotsl run-reverse cover mod
+.PHONY: all help build test fmt vet clean run-gotsl run-gotsr cover mod
 
 all: build
 
 help:
 	@echo "Available targets:"
-	@echo "  build          Build gotsl and reverse binaries"
+	@echo "  build          Build gotsl and gotsr binaries"
 	@echo "  test           Run all tests verbosely"
 	@echo "  fmt            Format code (go fmt ./...)"
 	@echo "  vet            Run go vet"
 	@echo "  clean          Remove built binaries and coverage files"
 	@echo "  run-gotsl      Run gotsl with PORT and IFACE (defaults: $(PORT) $(IFACE))"
-	@echo "  run-reverse    Run reverse with TARGET and RETRIES (defaults: $(TARGET) $(RETRIES))"
+	@echo "  run-gotsr      Run gotsr with TARGET and RETRIES (defaults: $(TARGET) $(RETRIES))"
 	@echo "  cover          Run tests with coverage and generate coverage.html"
 	@echo "  mod            Run 'go mod tidy'"
 
@@ -41,7 +41,7 @@ $(BIN_DIR):
 
 build: $(BIN_DIR)
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_GOTSL) ./cmd/gotsl
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_REVERSE) ./cmd/reverse
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_GOTSR) ./cmd/gotsr
 
 test:
 	$(GO) test ./... -v
@@ -58,8 +58,8 @@ clean:
 run-gotsl: build
 	$(BIN_GOTSL) $(PORT) $(IFACE)
 
-run-reverse: build
-	$(BIN_REVERSE) $(TARGET) $(RETRIES)
+run-gotsr: build
+	$(BIN_GOTSR) $(TARGET) $(RETRIES)
 
 cover:
 	$(GO) test ./... -coverprofile=coverage.out
