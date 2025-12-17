@@ -19,7 +19,7 @@ jobs:
             name: Linux
           - os: macos-latest
             name: macOS (ARM64)
-          - os: macos-13
+          - os: macos-15
             name: macOS (Intel)
     runs-on: ${{ matrix.os }}
     name: Test on ${{ matrix.name }}
