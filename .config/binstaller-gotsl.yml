@@ -2,7 +2,7 @@ schema: v1
 name: golang-https-rev
 repo: frjcomp/golang-https-rev
 asset:
-    template: golang-https-rev_listener_${OS}_${ARCH}${EXT}
+    template: golang-https-rev_gotsl_${OS}_${ARCH}${EXT}
     default_extension: .tar.gz
     rules:
         - when:
