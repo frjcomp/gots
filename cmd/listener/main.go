@@ -17,7 +17,22 @@ import (
 	"golang-https-rev/pkg/version"
 )
 
+func printHeader() {
+	fmt.Println()
+	fmt.Println("  ██████╗  ██████╗ ████████╗███████╗")
+	fmt.Println("  ██╔════╝ ██╔═══██╗╚══██╔══╝██╔════╝")
+	fmt.Println("  ██║  ███╗██║   ██║   ██║   ███████╗")
+	fmt.Println("  ██║   ██║██║   ██║   ██║   ╚════██║")
+	fmt.Println("  ╚██████╔╝╚██████╔╝   ██║   ███████║")
+	fmt.Println("   ╚═════╝  ╚═════╝    ╚═╝   ╚══════╝")
+	fmt.Println()
+	fmt.Println("  PIPELEEK - Go TLS Reverse Shell")
+	fmt.Println()
+}
+
 func main() {
+	printHeader()
+
 	if len(os.Args) != 3 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <port> <network-interface>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Example: %s 8443 0.0.0.0\n", os.Args[0])

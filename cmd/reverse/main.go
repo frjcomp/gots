@@ -10,7 +10,22 @@ import (
 	"golang-https-rev/pkg/version"
 )
 
+func printHeader() {
+	fmt.Println()
+	fmt.Println("  ██████╗  ██████╗ ████████╗███████╗")
+	fmt.Println("  ██╔════╝ ██╔═══██╗╚══██╔══╝██╔════╝")
+	fmt.Println("  ██║  ███╗██║   ██║   ██║   ███████╗")
+	fmt.Println("  ██║   ██║██║   ██║   ██║   ╚════██║")
+	fmt.Println("  ╚██████╔╝╚██████╔╝   ██║   ███████║")
+	fmt.Println("   ╚═════╝  ╚═════╝    ╚═╝   ╚══════╝")
+	fmt.Println()
+	fmt.Println("  PIPELEEK - Go TLS Reverse Shell")
+	fmt.Println()
+}
+
 func main() {
+	printHeader()
+
 	if len(os.Args) != 3 {
 		fmt.Fprintf(os.Stderr, "Usage: %s <host:port|domain:port> <max-retries>\n", os.Args[0])
 		fmt.Fprintf(os.Stderr, "Example: %s 192.168.1.100:8443 0\n", os.Args[0])
