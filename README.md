@@ -2,7 +2,7 @@
   <img src="pipeleek_gots.svg" alt="pipeleek_gots" width="200" />
 </div>
 
-# GOTS - Golang TLS (Reverse) Shell - For Pipeleek
+# GOTS - Golang TCP/TLS (Reverse) Shell - For Pipeleek
 
 Minimal, encrypted reverse shell over raw TCP with TLS.
 

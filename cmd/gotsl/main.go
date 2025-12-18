@@ -1,19 +1,18 @@
 package main
 
 import (
-	"bytes"
-	"compress/gzip"
 	"crypto/tls"
-	"encoding/hex"
 	"fmt"
-	"github.com/peterh/liner"
-	"io"
 	"log"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/peterh/liner"
+
 	"golang-https-rev/pkg/certs"
+	"golang-https-rev/pkg/compression"
+	"golang-https-rev/pkg/protocol"
 	"golang-https-rev/pkg/server"
 	"golang-https-rev/pkg/version"
 )
@@ -32,21 +31,25 @@ func printHeader() {
 }
 
 func main() {
+	if err := runListener(os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runListener(args []string) error {
 	printHeader()
 
-	if len(os.Args) != 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <port> <network-interface>\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s 8443 0.0.0.0\n", os.Args[0])
-		os.Exit(1)
+	if len(args) != 2 {
+		return fmt.Errorf("Usage: gotsl <port> <network-interface>")
 	}
 
-	port := os.Args[1]
-	networkInterface := os.Args[2]
+	port := args[0]
+	networkInterface := args[1]
 
 	log.Println("Generating self-signed certificate...")
 	cert, err := certs.GenerateSelfSignedCert()
 	if err != nil {
-		log.Fatalf("Failed to generate certificate: %v", err)
+		return fmt.Errorf("failed to generate certificate: %w", err)
 	}
 	log.Println("Certificate generated successfully")
 
@@ -62,37 +65,13 @@ func main() {
 	listener := server.NewListener(port, networkInterface, tlsConfig)
 	netListener, err := listener.Start()
 	if err != nil {
-		log.Fatalf("Failed to start listener: %v", err)
+		return fmt.Errorf("failed to start listener: %w", err)
 	}
 	defer netListener.Close()
 
 	log.Println("Listener ready. Waiting for connections...")
 	interactiveShell(listener)
-}
-
-func compressToHex(data []byte) (string, error) {
-	var buf bytes.Buffer
-	gz := gzip.NewWriter(&buf)
-	if _, err := gz.Write(data); err != nil {
-		return "", err
-	}
-	if err := gz.Close(); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(buf.Bytes()), nil
-}
-
-func decompressHex(payload string) ([]byte, error) {
-	compressed, err := hex.DecodeString(payload)
-	if err != nil {
-		return nil, err
-	}
-	gz, err := gzip.NewReader(bytes.NewReader(compressed))
-	if err != nil {
-		return nil, err
-	}
-	defer gz.Close()
-	return io.ReadAll(gz)
+	return nil
 }
 
 func interactiveShell(l *server.Listener) {
@@ -196,18 +175,16 @@ func interactiveShell(l *server.Listener) {
 					fmt.Printf("Error reading local file: %v\n", err)
 					continue
 				}
-				compressed, err := compressToHex(data)
+				compressed, err := compression.CompressToHex(data)
 				if err != nil {
 					fmt.Printf("Error compressing file: %v\n", err)
 					continue
 				}
-				
+
 				// Send file in chunks to avoid exceeding buffer limits on Windows
-				const chunkSize = 65536 // 64KB chunks
 				totalSize := len(compressed)
-				
-				// Send metadata: START_UPLOAD <remote_path> <total_size>
-				startCmd := fmt.Sprintf("START_UPLOAD %s %d", remotePath, totalSize)
+
+				startCmd := fmt.Sprintf("%s %s %d", protocol.CmdStartUpload, remotePath, totalSize)
 				if err := l.SendCommand(currentClient, startCmd); err != nil {
 					fmt.Printf("Error starting upload: %v\n", err)
 					currentClient = ""
@@ -219,15 +196,15 @@ func interactiveShell(l *server.Listener) {
 					currentClient = ""
 					continue
 				}
-				
+
 				// Send chunks
-				for i := 0; i < totalSize; i += chunkSize {
-					end := i + chunkSize
+				for i := 0; i < totalSize; i += protocol.ChunkSize {
+					end := i + protocol.ChunkSize
 					if end > totalSize {
 						end = totalSize
 					}
 					chunk := compressed[i:end]
-					chunkCmd := fmt.Sprintf("UPLOAD_CHUNK %s", chunk)
+					chunkCmd := fmt.Sprintf("%s %s", protocol.CmdUploadChunk, chunk)
 					if err := l.SendCommand(currentClient, chunkCmd); err != nil {
 						fmt.Printf("Error sending upload chunk: %v\n", err)
 						currentClient = ""
@@ -245,13 +222,12 @@ func interactiveShell(l *server.Listener) {
 						break
 					}
 				}
-				
+
 				if currentClient == "" {
 					continue
 				}
-				
-				// Send END_UPLOAD to finalize
-				endCmd := fmt.Sprintf("END_UPLOAD %s", remotePath)
+
+				endCmd := fmt.Sprintf("%s %s", protocol.CmdEndUpload, remotePath)
 				if err := l.SendCommand(currentClient, endCmd); err != nil {
 					fmt.Printf("Error ending upload: %v\n", err)
 					currentClient = ""
@@ -263,7 +239,7 @@ func interactiveShell(l *server.Listener) {
 					currentClient = ""
 					continue
 				}
-				clean := strings.ReplaceAll(resp, "<<<END_OF_OUTPUT>>>", "")
+				clean := strings.ReplaceAll(resp, protocol.EndOfOutputMarker, "")
 				fmt.Print(clean)
 				if !strings.HasSuffix(clean, "\n") {
 					fmt.Println()
@@ -278,7 +254,7 @@ func interactiveShell(l *server.Listener) {
 					continue
 				}
 				remotePath, localPath := parts[1], parts[2]
-				cmd := fmt.Sprintf("DOWNLOAD %s", remotePath)
+				cmd := fmt.Sprintf("%s %s", protocol.CmdDownload, remotePath)
 				if err := l.SendCommand(currentClient, cmd); err != nil {
 					fmt.Printf("Error sending download: %v\n", err)
 					currentClient = ""
@@ -290,15 +266,14 @@ func interactiveShell(l *server.Listener) {
 					currentClient = ""
 					continue
 				}
-				clean := strings.ReplaceAll(resp, "<<<END_OF_OUTPUT>>>", "")
+				clean := strings.ReplaceAll(resp, protocol.EndOfOutputMarker, "")
 				clean = strings.TrimSpace(clean)
-				const prefix = "DATA "
-				if !strings.HasPrefix(clean, prefix) {
+				if !strings.HasPrefix(clean, protocol.DataPrefix) {
 					fmt.Printf("Unexpected download response (length %d bytes)\n", len(clean))
 					continue
 				}
-				payload := strings.TrimPrefix(clean, prefix)
-				decoded, err := decompressHex(payload)
+				payload := strings.TrimPrefix(clean, protocol.DataPrefix)
+				decoded, err := compression.DecompressHex(payload)
 				if err != nil {
 					fmt.Printf("Error decoding payload: %v\n", err)
 					continue
@@ -324,7 +299,7 @@ func interactiveShell(l *server.Listener) {
 				continue
 			}
 
-			clean := strings.ReplaceAll(resp, "<<<END_OF_OUTPUT>>>", "")
+			clean := strings.ReplaceAll(resp, protocol.EndOfOutputMarker, "")
 			fmt.Print(clean)
 			if !strings.HasSuffix(clean, "\n") {
 				fmt.Println()

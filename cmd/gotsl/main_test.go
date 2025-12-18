@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"testing"
+
+	"golang-https-rev/pkg/compression"
 )
 
 // TestCompressDecompressRoundTrip verifies that data can be compressed to hex and decompressed back identically
@@ -10,9 +12,9 @@ func TestCompressDecompressRoundTrip(t *testing.T) {
 	testData := []byte("Hello, this is test data for compression! " + string(bytes.Repeat([]byte("x"), 1000)))
 
 	// Compress
-	compressed, err := compressToHex(testData)
+	compressed, err := compression.CompressToHex(testData)
 	if err != nil {
-		t.Fatalf("compressToHex failed: %v", err)
+		t.Fatalf("CompressToHex failed: %v", err)
 	}
 
 	// Verify compressed is not empty
@@ -21,9 +23,9 @@ func TestCompressDecompressRoundTrip(t *testing.T) {
 	}
 
 	// Decompress
-	decompressed, err := decompressHex(compressed)
+	decompressed, err := compression.DecompressHex(compressed)
 	if err != nil {
-		t.Fatalf("decompressHex failed: %v", err)
+		t.Fatalf("DecompressHex failed: %v", err)
 	}
 
 	// Verify round-trip
@@ -36,14 +38,14 @@ func TestCompressDecompressRoundTrip(t *testing.T) {
 func TestCompressEmptyData(t *testing.T) {
 	testData := []byte{}
 
-	compressed, err := compressToHex(testData)
+	compressed, err := compression.CompressToHex(testData)
 	if err != nil {
-		t.Fatalf("compressToHex failed on empty data: %v", err)
+		t.Fatalf("CompressToHex failed on empty data: %v", err)
 	}
 
-	decompressed, err := decompressHex(compressed)
+	decompressed, err := compression.DecompressHex(compressed)
 	if err != nil {
-		t.Fatalf("decompressHex failed on empty data: %v", err)
+		t.Fatalf("DecompressHex failed on empty data: %v", err)
 	}
 
 	if !bytes.Equal(decompressed, testData) {
@@ -56,14 +58,14 @@ func TestCompressLargeData(t *testing.T) {
 	// Create 5MB of repetitive data
 	testData := bytes.Repeat([]byte("large data payload "), 262144)
 
-	compressed, err := compressToHex(testData)
+	compressed, err := compression.CompressToHex(testData)
 	if err != nil {
-		t.Fatalf("compressToHex failed on large data: %v", err)
+		t.Fatalf("CompressToHex failed on large data: %v", err)
 	}
 
-	decompressed, err := decompressHex(compressed)
+	decompressed, err := compression.DecompressHex(compressed)
 	if err != nil {
-		t.Fatalf("decompressHex failed on large data: %v", err)
+		t.Fatalf("DecompressHex failed on large data: %v", err)
 	}
 
 	if !bytes.Equal(decompressed, testData) {
@@ -73,9 +75,9 @@ func TestCompressLargeData(t *testing.T) {
 
 // TestDecompressInvalidHex verifies that invalid hex input is handled gracefully
 func TestDecompressInvalidHex(t *testing.T) {
-	_, err := decompressHex("invalid!@#$%hex")
+	_, err := compression.DecompressHex("invalid!@#$%hex")
 	if err == nil {
-		t.Fatal("decompressHex should return error for invalid hex input")
+		t.Fatal("DecompressHex should return error for invalid hex input")
 	}
 }
 
@@ -84,8 +86,17 @@ func TestDecompressCorruptedGzip(t *testing.T) {
 	// Create valid hex that doesn't contain valid gzip data
 	invalidGzip := "deadbeef"
 
-	_, err := decompressHex(invalidGzip)
+	_, err := compression.DecompressHex(invalidGzip)
 	if err == nil {
-		t.Fatal("decompressHex should return error for corrupted gzip data")
+		t.Fatal("DecompressHex should return error for corrupted gzip data")
+	}
+}
+
+func TestRunListenerArgValidation(t *testing.T) {
+	if err := runListener([]string{}); err == nil {
+		t.Fatal("expected error for missing args")
+	}
+	if err := runListener([]string{"8443"}); err == nil {
+		t.Fatal("expected error for too few args")
 	}
 }

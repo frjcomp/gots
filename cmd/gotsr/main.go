@@ -24,19 +24,21 @@ func printHeader() {
 }
 
 func main() {
+	if err := runClient(os.Args[1:]); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func runClient(args []string) error {
 	printHeader()
 
-	if len(os.Args) != 3 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <host:port|domain:port> <max-retries>\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s 192.168.1.100:8443 0\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "Example: %s example.com:8443 5\n", os.Args[0])
-		fmt.Fprintf(os.Stderr, "\nmax-retries: 0 for infinite retries, or specify a number\n")
-		os.Exit(1)
+	if len(args) != 2 {
+		return fmt.Errorf("Usage: gotsr <host:port|domain:port> <max-retries>")
 	}
 
-	target := os.Args[1]
+	target := args[0]
 	maxRetries := 0
-	fmt.Sscanf(os.Args[2], "%d", &maxRetries)
+	fmt.Sscanf(args[1], "%d", &maxRetries)
 
 	log.Printf("Starting GOTS - PIPELEEK client...")
 	log.Printf("Version: %s (commit %s, date %s)", version.Version, version.Commit, version.Date)
@@ -44,6 +46,7 @@ func main() {
 	log.Printf("Max retries: %d (0 = infinite)", maxRetries)
 
 	connectWithRetry(target, maxRetries)
+	return nil
 }
 
 func connectWithRetry(target string, maxRetries int) {
