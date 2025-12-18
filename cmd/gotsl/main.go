@@ -136,7 +136,7 @@ func interactiveShell(l *server.Listener) {
 
 		if currentClient == "" {
 			switch command {
-			case "ls":
+			case "ls", "dir":
 				clients := l.GetClients()
 				if len(clients) == 0 {
 					fmt.Println("No clients connected")
