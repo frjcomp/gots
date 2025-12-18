@@ -23,6 +23,7 @@ type Listener struct {
 	tlsConfig         *tls.Config
 	clientConnections map[string]chan string
 	clientResponses   map[string]chan string
+	clientPausePing   map[string]chan bool
 	mutex             sync.Mutex
 }
 
@@ -35,6 +36,7 @@ func NewListener(port, networkInterface string, tlsConfig *tls.Config) *Listener
 		tlsConfig:         tlsConfig,
 		clientConnections: make(map[string]chan string),
 		clientResponses:   make(map[string]chan string),
+		clientPausePing:   make(map[string]chan bool),
 	}
 }
 
@@ -73,19 +75,23 @@ func (l *Listener) handleClient(conn net.Conn) {
 
 	cmdChan := make(chan string, 10)
 	respChan := make(chan string, 10)
+	pausePing := make(chan bool, 1)
 
 	l.mutex.Lock()
 	l.clientConnections[clientAddr] = cmdChan
 	l.clientResponses[clientAddr] = respChan
+	l.clientPausePing[clientAddr] = pausePing
 	l.mutex.Unlock()
 
 	defer func() {
 		l.mutex.Lock()
 		delete(l.clientConnections, clientAddr)
 		delete(l.clientResponses, clientAddr)
+		delete(l.clientPausePing, clientAddr)
 		l.mutex.Unlock()
 		close(cmdChan)
 		close(respChan)
+		close(pausePing)
 		log.Printf("[-] Client disconnected: %s", clientAddr)
 	}()
 
@@ -135,8 +141,9 @@ func (l *Listener) handleClient(conn net.Conn) {
 	}()
 
 	// Wait for commands
-	pingTimer := time.NewTimer(protocol.PingInterval * time.Second)
-	defer pingTimer.Stop()
+	pingTicker := time.NewTicker(protocol.PingInterval * time.Second)
+	defer pingTicker.Stop()
+	pingPaused := false
 
 	for {
 		select {
@@ -147,25 +154,20 @@ func (l *Listener) handleClient(conn net.Conn) {
 			fmt.Fprintf(writer, "%s\n", cmd)
 			writer.Flush()
 
-			// Reset ping timer since we just sent a command
-			if !pingTimer.Stop() {
-				select {
-				case <-pingTimer.C:
-				default:
-				}
-			}
-			pingTimer.Reset(protocol.PingInterval * time.Second)
-
 			if cmd == protocol.CmdExit {
 				return
 			}
 		case <-readerFailed:
 			log.Printf("Reader failed for client %s, closing connection", clientAddr)
 			return
-		case <-pingTimer.C:
-			fmt.Fprintf(writer, "%s\n", protocol.CmdPing)
-			writer.Flush()
-			pingTimer.Reset(protocol.PingInterval * time.Second)
+		case pause := <-pausePing:
+			pingPaused = pause
+		case <-pingTicker.C:
+			// Only send PING if not paused (i.e., not waiting for command response)
+			if !pingPaused {
+				fmt.Fprintf(writer, "%s\n", protocol.CmdPing)
+				writer.Flush()
+			}
 		}
 	}
 }
@@ -187,10 +189,19 @@ func (l *Listener) GetClients() []string {
 func (l *Listener) SendCommand(clientAddr, cmd string) error {
 	l.mutex.Lock()
 	cmdChan, exists := l.clientConnections[clientAddr]
+	pauseChan, pauseExists := l.clientPausePing[clientAddr]
 	l.mutex.Unlock()
 
 	if !exists {
 		return fmt.Errorf("client %s not found", clientAddr)
+	}
+
+	// Pause PING to avoid interference with command response
+	if pauseExists {
+		select {
+		case pauseChan <- true:
+		default:
+		}
 	}
 
 	select {
@@ -206,11 +217,22 @@ func (l *Listener) SendCommand(clientAddr, cmd string) error {
 func (l *Listener) GetResponse(clientAddr string, timeout time.Duration) (string, error) {
 	l.mutex.Lock()
 	respChan, exists := l.clientResponses[clientAddr]
+	pauseChan, pauseExists := l.clientPausePing[clientAddr]
 	l.mutex.Unlock()
 
 	if !exists {
 		return "", fmt.Errorf("client %s not found", clientAddr)
 	}
+
+	// Resume PING after getting response
+	defer func() {
+		if pauseExists {
+			select {
+			case pauseChan <- false:
+			default:
+			}
+		}
+	}()
 
 	select {
 	case resp := <-respChan:

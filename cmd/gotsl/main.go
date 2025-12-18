@@ -203,35 +203,38 @@ func interactiveShell(l *server.Listener) {
 				}
 
 				// Send chunks
-				for i := 0; i < totalSize; i += protocol.ChunkSize {
-					end := i + protocol.ChunkSize
-					if end > totalSize {
-						end = totalSize
-					}
-					chunk := compressed[i:end]
-					chunkCmd := fmt.Sprintf("%s %s", protocol.CmdUploadChunk, chunk)
-					if err := l.SendCommand(currentClient, chunkCmd); err != nil {
-						fmt.Printf("Error sending upload chunk: %v\n", err)
-						currentClient = ""
-						break
-					}
-					resp, err := l.GetResponse(currentClient, 30*time.Second)
-					if err != nil {
-						fmt.Printf("Error getting chunk response: %v\n", err)
-						currentClient = ""
-						break
-					}
-					if !strings.Contains(resp, "OK") {
-						cleanResp := strings.TrimSpace(strings.ReplaceAll(resp, protocol.EndOfOutputMarker, ""))
-						fmt.Printf("Chunk upload error: %s\n", cleanResp)
-						currentClient = ""
-						break
-					}
+			chunkNum := 0
+			for i := 0; i < totalSize; i += protocol.ChunkSize {
+				end := i + protocol.ChunkSize
+				if end > totalSize {
+					end = totalSize
 				}
+				chunk := compressed[i:end]
+				chunkNum++
+				chunkCmd := fmt.Sprintf("%s %s", protocol.CmdUploadChunk, chunk)
+				if err := l.SendCommand(currentClient, chunkCmd); err != nil {
+					fmt.Printf("Error sending upload chunk: %v\n", err)
+					currentClient = ""
+					break
+				}
+				resp, err := l.GetResponse(currentClient, 30*time.Second)
+				if err != nil {
+					fmt.Printf("Error getting chunk response: %v\n", err)
+					currentClient = ""
+					break
+				}
+				if !strings.Contains(resp, "OK") {
+					cleanResp := strings.TrimSpace(strings.ReplaceAll(resp, protocol.EndOfOutputMarker, ""))
+					fmt.Printf("Chunk upload error: %s\n", cleanResp)
+					currentClient = ""
+					break
+				}
+				fmt.Printf("Uploaded chunk %d: %d bytes\n", chunkNum, len(chunk))
+			}
 
-				if currentClient == "" {
-					continue
-				}
+			if currentClient == "" {
+				continue
+			}
 
 				endCmd := fmt.Sprintf("%s %s", protocol.CmdEndUpload, remotePath)
 				if err := l.SendCommand(currentClient, endCmd); err != nil {
@@ -250,6 +253,7 @@ func interactiveShell(l *server.Listener) {
 				if !strings.HasSuffix(clean, "\n") {
 					fmt.Println()
 				}
+				fmt.Printf("Total uploaded: %d bytes (original), %d bytes (compressed)\n", len(data), totalSize)
 				continue
 			}
 
