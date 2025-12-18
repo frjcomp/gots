@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,12 +15,12 @@ import (
 
 // Listener represents a reverse shell listener server
 type Listener struct {
-	port                string
-	networkInterface    string
-	tlsConfig           *tls.Config
-	clientConnections   map[string]chan string
-	clientResponses     map[string]chan string
-	mutex               sync.Mutex
+	port              string
+	networkInterface  string
+	tlsConfig         *tls.Config
+	clientConnections map[string]chan string
+	clientResponses   map[string]chan string
+	mutex             sync.Mutex
 }
 
 // NewListener creates a new reverse shell listener
@@ -94,6 +95,19 @@ func (l *Listener) handleClient(conn net.Conn) {
 		var responseBuffer strings.Builder
 		for {
 			line, err := reader.ReadString('\n')
+
+			// Append what we received, even if the buffer filled before newline
+			responseBuffer.WriteString(line)
+
+			// If the buffer filled before we hit a newline, keep reading without closing the connection
+			if errors.Is(err, bufio.ErrBufferFull) {
+				if responseBuffer.Len() > 10*1024*1024 { // avoid unbounded growth
+					log.Printf("Response from client %s exceeds 10MB without delimiter; resetting buffer", clientAddr)
+					responseBuffer.Reset()
+				}
+				continue
+			}
+
 			if err != nil {
 				if err != io.EOF {
 					log.Printf("Error reading from client %s: %v", clientAddr, err)
@@ -102,10 +116,8 @@ func (l *Listener) handleClient(conn net.Conn) {
 				return
 			}
 
-			responseBuffer.WriteString(line)
-
-			// Check if we've reached the end of output marker
-			if strings.Contains(line, "<<<END_OF_OUTPUT>>>") {
+			// Check if we've reached the end of output marker anywhere in the buffer
+			if strings.Contains(responseBuffer.String(), "<<<END_OF_OUTPUT>>>") {
 				fullResponse := responseBuffer.String()
 				select {
 				case respChan <- fullResponse:

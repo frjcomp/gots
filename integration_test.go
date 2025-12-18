@@ -87,55 +87,47 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 	send(listener, "whoami\n")
 	waitForContains(t, listener, user, 5*time.Second)
 	waitForContains(t, reverse, "Received command: whoami", 5*time.Second)
-	
-	// Increased delay for Windows stability - connection seems to drop after whoami on Windows
-	time.Sleep(2 * time.Second)
 
-	// Skip large file transfer test on Windows due to connection stability issues
-	// The file transfer functionality works but has intermittent connection closure
-	if runtime.GOOS != "windows" {
-		// Exercise large file upload (forces multiple chunks over the connection) and verify integrity.
-		sharedDir := t.TempDir()
-		localLarge := filepath.Join(sharedDir, "large_local.bin")
-		remoteLarge := filepath.Join(sharedDir, "large_remote.bin")
-		downloadedLarge := filepath.Join(sharedDir, "large_download.bin")
+	// Exercise large file upload (forces multiple chunks over the connection) and verify integrity.
+	sharedDir := t.TempDir()
+	localLarge := filepath.Join(sharedDir, "large_local.bin")
+	remoteLarge := filepath.Join(sharedDir, "large_remote.bin")
+	downloadedLarge := filepath.Join(sharedDir, "large_download.bin")
 
-		// Normalize paths to use forward slashes for command-line transmission
-		localLargeNormalized := filepath.ToSlash(localLarge)
-		remoteLargeNormalized := filepath.ToSlash(remoteLarge)
-		downloadedLargeNormalized := filepath.ToSlash(downloadedLarge)
+	// Normalize paths to use forward slashes for command-line transmission
+	localLargeNormalized := filepath.ToSlash(localLarge)
+	remoteLargeNormalized := filepath.ToSlash(remoteLarge)
+	downloadedLargeNormalized := filepath.ToSlash(downloadedLarge)
 
-		payload := bytes.Repeat([]byte("chunk-0123456789"), 200000) // 2,000,000 bytes
-		if err := os.WriteFile(localLarge, payload, 0o644); err != nil {
-			t.Fatalf("write local large file: %v", err)
-		}
-
-		send(listener, fmt.Sprintf("upload %s %s\n", localLargeNormalized, remoteLargeNormalized))
-		waitForContains(t, listener, "Uploaded", 15*time.Second)
-		// Give the connection time to settle after large file upload
-		time.Sleep(1 * time.Second)
-
-		remoteBytes := mustReadFile(t, remoteLarge)
-		if !bytes.Equal(remoteBytes, payload) {
-			want := sha256.Sum256(payload)
-			got := sha256.Sum256(remoteBytes)
-			t.Fatalf("uploaded file mismatch: want %d bytes (sha256 %x), got %d bytes (sha256 %x)", len(payload), want, len(remoteBytes), got)
-		}
-
-		// Download the same file back and verify integrity.
-		send(listener, fmt.Sprintf("download %s %s\n", remoteLargeNormalized, downloadedLargeNormalized))
-		waitForContains(t, listener, "Downloaded", 15*time.Second)
-		// Give the connection time to settle after large file download
-		time.Sleep(1 * time.Second)
-
-		downloaded := mustReadFile(t, downloadedLarge)
-		if !bytes.Equal(downloaded, payload) {
-			want := sha256.Sum256(payload)
-			got := sha256.Sum256(downloaded)
-			t.Fatalf("downloaded file mismatch: want %d bytes (sha256 %x), got %d bytes (sha256 %x)", len(payload), want, len(downloaded), got)
-		}
+	payload := bytes.Repeat([]byte("chunk-0123456789"), 200000) // 2,000,000 bytes
+	if err := os.WriteFile(localLarge, payload, 0o644); err != nil {
+		t.Fatalf("write local large file: %v", err)
 	}
 
+	send(listener, fmt.Sprintf("upload %s %s\n", localLargeNormalized, remoteLargeNormalized))
+	waitForContains(t, listener, "Uploaded", 15*time.Second)
+	// Give the connection time to settle after large file upload
+	time.Sleep(1 * time.Second)
+
+	remoteBytes := mustReadFile(t, remoteLarge)
+	if !bytes.Equal(remoteBytes, payload) {
+		want := sha256.Sum256(payload)
+		got := sha256.Sum256(remoteBytes)
+		t.Fatalf("uploaded file mismatch: want %d bytes (sha256 %x), got %d bytes (sha256 %x)", len(payload), want, len(remoteBytes), got)
+	}
+
+	// Download the same file back and verify integrity.
+	send(listener, fmt.Sprintf("download %s %s\n", remoteLargeNormalized, downloadedLargeNormalized))
+	waitForContains(t, listener, "Downloaded", 15*time.Second)
+	// Give the connection time to settle after large file download
+	time.Sleep(1 * time.Second)
+
+	downloaded := mustReadFile(t, downloadedLarge)
+	if !bytes.Equal(downloaded, payload) {
+		want := sha256.Sum256(payload)
+		got := sha256.Sum256(downloaded)
+		t.Fatalf("downloaded file mismatch: want %d bytes (sha256 %x), got %d bytes (sha256 %x)", len(payload), want, len(downloaded), got)
+	}
 	// Background the session and exit the listener REPL.
 	send(listener, "bg\n")
 	waitForContains(t, listener, "Backgrounding session", 5*time.Second)
