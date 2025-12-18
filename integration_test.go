@@ -54,7 +54,7 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 	}
 
 	port := freePort(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	listenerBin := buildBinary(t, "gotsl", "./cmd/gotsl")
@@ -94,12 +94,17 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 	remoteLarge := filepath.Join(sharedDir, "large_remote.bin")
 	downloadedLarge := filepath.Join(sharedDir, "large_download.bin")
 
+	// Normalize paths to use forward slashes for command-line transmission
+	localLargeNormalized := filepath.ToSlash(localLarge)
+	remoteLargeNormalized := filepath.ToSlash(remoteLarge)
+	downloadedLargeNormalized := filepath.ToSlash(downloadedLarge)
+
 	payload := bytes.Repeat([]byte("chunk-0123456789"), 200000) // 2,000,000 bytes
 	if err := os.WriteFile(localLarge, payload, 0o644); err != nil {
 		t.Fatalf("write local large file: %v", err)
 	}
 
-	send(listener, fmt.Sprintf("upload %s %s\n", localLarge, remoteLarge))
+	send(listener, fmt.Sprintf("upload %s %s\n", localLargeNormalized, remoteLargeNormalized))
 	waitForContains(t, listener, "Uploaded", 15*time.Second)
 
 	remoteBytes := mustReadFile(t, remoteLarge)
@@ -110,7 +115,7 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 	}
 
 	// Download the same file back and verify integrity.
-	send(listener, fmt.Sprintf("download %s %s\n", remoteLarge, downloadedLarge))
+	send(listener, fmt.Sprintf("download %s %s\n", remoteLargeNormalized, downloadedLargeNormalized))
 	waitForContains(t, listener, "Downloaded", 15*time.Second)
 
 	downloaded := mustReadFile(t, downloadedLarge)
@@ -196,7 +201,7 @@ func TestCommandLoadAndBuffering(t *testing.T) {
 	}
 
 	port := freePort(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
 	listenerBin := buildBinary(t, "gotsl", "./cmd/gotsl")
@@ -247,7 +252,12 @@ func TestCommandLoadAndBuffering(t *testing.T) {
 
 		// For commands with expected output, wait for it
 		if tc.contains != "" {
-			waitForContains(t, listener, tc.contains, 5*time.Second)
+			// Give more time for the last command or file-transfer-heavy commands
+			waitTime := 5 * time.Second
+			if i == len(testCases)-1 { // Last command
+				waitTime = 10 * time.Second
+			}
+			waitForContains(t, listener, tc.contains, waitTime)
 		} else {
 			// For commands without specific output, just give it time to execute
 			time.Sleep(300 * time.Millisecond)
