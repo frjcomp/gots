@@ -130,10 +130,13 @@ func (l *Listener) handleClient(conn net.Conn) {
 			// Check if we've reached the end of output marker anywhere in the buffer
 			if strings.Contains(responseBuffer.String(), protocol.EndOfOutputMarker) {
 				fullResponse := responseBuffer.String()
+				// Non-blocking send to avoid deadlock if response channel is full
 				select {
 				case respChan <- fullResponse:
-				case <-time.After(protocol.ResponseTimeout * time.Second):
-					log.Printf("Warning: response channel full or blocked for client %s", clientAddr)
+					// Successfully sent
+				default:
+					// Channel full, drop this response and log warning
+					log.Printf("Warning: response channel full for client %s, dropping response", clientAddr)
 				}
 				responseBuffer.Reset()
 			}
