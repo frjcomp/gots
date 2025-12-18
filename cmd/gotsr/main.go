@@ -73,7 +73,7 @@ func connectWithRetry(target string, maxRetries int) {
 		}
 
 		if err := cl.HandleCommands(); err != nil {
-			log.Printf("Error: %v", err)
+			log.Printf("Connection failed: %v", err)
 			cl.Close()
 
 			if maxRetries > 0 {
