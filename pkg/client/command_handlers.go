@@ -165,26 +165,35 @@ func (rc *ReverseClient) handlePtyModeCommand() error {
 
 	// Capture the current ptmx for the goroutine so it doesn't use a stale reference
 	currentPtyFile := ptmx
+	currentPtyCmd := cmd
 
 	// Start goroutine to forward PTY output to server
 	go func() {
 		buf := make([]byte, 4096)
 		for {
 			// Check if we've exited PTY mode or switched to a different PTY
-			if !rc.inPtyMode || rc.ptyFile != currentPtyFile {
+			rc.ptyMutex.Lock()
+			stillActive := rc.inPtyMode && rc.ptyFile == currentPtyFile
+			rc.ptyMutex.Unlock()
+			
+			if !stillActive {
 				break
 			}
 			
 			n, err := currentPtyFile.Read(buf)
 			if err != nil {
 				if err != io.EOF {
-					log.Printf("PTY read error: %v", err)
+					log.Printf("PTY read error: %v (shell may have exited)", err)
 				}
 				break
 			}
 			if n > 0 {
 				// Double-check we're still in the same PTY session
-				if !rc.inPtyMode || rc.ptyFile != currentPtyFile {
+				rc.ptyMutex.Lock()
+				stillActive := rc.inPtyMode && rc.ptyFile == currentPtyFile
+				rc.ptyMutex.Unlock()
+				
+				if !stillActive {
 					break
 				}
 				// Compress and encode PTY data as hex
@@ -197,12 +206,30 @@ func (rc *ReverseClient) handlePtyModeCommand() error {
 				rc.writer.Flush()
 			}
 		}
-		// PTY closed, exit PTY mode
-		rc.inPtyMode = false
-		rc.ptyFile = nil
-		rc.ptyCmd = nil
-		rc.writer.WriteString(protocol.CmdPtyExit + "\n")
-		rc.writer.Flush()
+		
+		// Wait for the shell process to exit
+		if currentPtyCmd.Process != nil {
+			currentPtyCmd.Wait()
+		}
+		
+		// PTY closed, exit PTY mode with proper synchronization
+		rc.ptyMutex.Lock()
+		// Only clean up if we're still in the same PTY session
+		if rc.inPtyMode && rc.ptyFile == currentPtyFile {
+			log.Printf("PTY shell exited, cleaning up")
+			rc.inPtyMode = false
+			if rc.ptyFile != nil {
+				rc.ptyFile.Close()
+			}
+			rc.ptyFile = nil
+			rc.ptyCmd = nil
+			rc.ptyMutex.Unlock()
+			
+			rc.writer.WriteString(protocol.CmdPtyExit + "\n")
+			rc.writer.Flush()
+		} else {
+			rc.ptyMutex.Unlock()
+		}
 	}()
 
 	return nil
@@ -210,7 +237,12 @@ func (rc *ReverseClient) handlePtyModeCommand() error {
 
 // handlePtyDataCommand forwards data to the PTY
 func (rc *ReverseClient) handlePtyDataCommand(command string) error {
-	if !rc.inPtyMode || rc.ptyFile == nil {
+	rc.ptyMutex.Lock()
+	ptyActive := rc.inPtyMode && rc.ptyFile != nil
+	ptyFile := rc.ptyFile
+	rc.ptyMutex.Unlock()
+	
+	if !ptyActive {
 		return fmt.Errorf("not in PTY mode")
 	}
 
@@ -220,13 +252,18 @@ func (rc *ReverseClient) handlePtyDataCommand(command string) error {
 	if err != nil {
 		return fmt.Errorf("failed to decompress PTY data: %v", err)
 	}
-	_, err = rc.ptyFile.Write(data)
+	_, err = ptyFile.Write(data)
 	return err
 }
 
 // handlePtyResizeCommand handles window resize for PTY
 func (rc *ReverseClient) handlePtyResizeCommand(command string) error {
-	if !rc.inPtyMode || rc.ptyFile == nil {
+	rc.ptyMutex.Lock()
+	ptyActive := rc.inPtyMode && rc.ptyFile != nil
+	ptyFile := rc.ptyFile
+	rc.ptyMutex.Unlock()
+	
+	if !ptyActive {
 		return fmt.Errorf("not in PTY mode")
 	}
 
@@ -252,7 +289,7 @@ func (rc *ReverseClient) handlePtyResizeCommand(command string) error {
 	}
 	_, _, errno := syscall.Syscall(
 		syscall.SYS_IOCTL,
-		uintptr(rc.ptyFile.Fd()),
+		uintptr(ptyFile.Fd()),
 		uintptr(syscall.TIOCSWINSZ),
 		uintptr(unsafe.Pointer(ws)),
 	)
@@ -265,10 +302,14 @@ func (rc *ReverseClient) handlePtyResizeCommand(command string) error {
 
 // handlePtyExitCommand exits PTY mode
 func (rc *ReverseClient) handlePtyExitCommand() error {
+	rc.ptyMutex.Lock()
+	defer rc.ptyMutex.Unlock()
+	
 	if !rc.inPtyMode {
 		return nil
 	}
 
+	log.Printf("Exiting PTY mode (requested by listener)")
 	rc.inPtyMode = false
 
 	if rc.ptyCmd != nil && rc.ptyCmd.Process != nil {

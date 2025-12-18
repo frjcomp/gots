@@ -3,15 +3,15 @@ package main
 import (
 	"crypto/tls"
 	"fmt"
+	"bufio"
 	"io"
 	"log"
+	"net"
 	"os"
 	"strings"
 	"syscall"
 	"time"
 	"unsafe"
-
-	"github.com/peterh/liner"
 
 	"golang-https-rev/pkg/certs"
 	"golang-https-rev/pkg/compression"
@@ -84,29 +84,22 @@ type listenerInterface interface {
 }
 
 func interactiveShell(l *server.Listener) {
-	line := liner.NewLiner()
-	line.SetCtrlCAborts(true)
-	defer line.Close()
+	reader := bufio.NewReader(os.Stdin)
 
 	printHelp()
 
 	for {
-		prompt := "listener> "
-
-		input, err := line.Prompt(prompt)
+		fmt.Print("listener> ")
+		line, err := reader.ReadString('\n')
 		if err != nil {
-			if err == liner.ErrPromptAborted {
-				fmt.Println()
-				continue
-			}
+			// Treat EOF (Ctrl-D) as exit; other errors just return
 			return
 		}
 
-		input = strings.TrimSpace(input)
+		input := strings.TrimSpace(line)
 		if input == "" {
 			continue
 		}
-		line.AppendHistory(input)
 
 		parts := strings.Fields(input)
 		command := parts[0]
@@ -346,72 +339,107 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 		// Continue anyway
 	}
 	defer func() {
+		// Clear any read deadlines on stdin
+		os.Stdin.SetReadDeadline(time.Time{})
+		
+		// Restore terminal state
+		// Restore terminal state to what it was before PTY mode
+		// The liner library manages echo and line editing, so we just restore the saved state
 		if oldState != nil {
 			restoreTerminal(oldState)
 		}
+		
+		// Force a newline to reset the terminal display
+		fmt.Println()
 	}()
 
-	// Channel to signal output goroutine to stop
-	outputDone := make(chan bool, 1)
+	// Channel to signal we should exit
+	exitPty := make(chan bool, 1)
+	remoteClosed := false
 
 	// Forward PTY output to stdout
 	go func() {
 		for {
-			select {
-			case data, ok := <-ptyDataChan:
-				if !ok {
-					// Channel closed, exit goroutine
-					outputDone <- true
-					return
-				}
-				os.Stdout.Write(data)
-			case <-outputDone:
-				// Graceful shutdown signal
+			data, ok := <-ptyDataChan
+			if !ok {
+				// Channel closed - remote PTY exited
+				fmt.Printf("\r\n[Remote shell exited]\r\n")
+				remoteClosed = true
+				exitPty <- true
 				return
 			}
+			os.Stdout.Write(data)
 		}
 	}()
 
 	// Read from stdin and forward to PTY
-	stdinBuf := make([]byte, 1024)
-	
-	for {
-		n, err := os.Stdin.Read(stdinBuf)
-		if err != nil {
-			if err != io.EOF {
-				fmt.Printf("\nError reading stdin: %v\n", err)
+	go func() {
+		stdinBuf := make([]byte, 1024)
+		
+		defer func() {
+			// Ensure deadline is cleared when goroutine exits
+			os.Stdin.SetReadDeadline(time.Time{})
+		}()
+		
+		for {
+			select {
+			case <-exitPty:
+				// Remote closed, stop reading stdin
+				return
+			default:
+				// Continue reading
 			}
-			break
-		}
-
-		if n > 0 {
-			data := stdinBuf[:n]
 			
-			// Check for Ctrl-D (EOF)
-			if strings.Contains(string(data), "\x04") {
-				break
-			}
-
-			// Send data immediately to PTY
-			encoded, err := compression.CompressToHex(data)
+			// Set a read timeout so we can check exitPty periodically
+			os.Stdin.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+			n, err := os.Stdin.Read(stdinBuf)
+			
 			if err != nil {
-				fmt.Printf("\nError encoding input: %v\n", err)
-				break
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					// Timeout, check if we should exit
+					continue
+				}
+				if err != io.EOF {
+					// Real error
+					return
+				}
+				return
 			}
-			l.SendCommand(clientAddr, protocol.CmdPtyData+" "+encoded)
-		}
-	}
 
-	// Exit PTY mode
-	fmt.Println("\nExiting PTY shell...")
-	l.SendCommand(clientAddr, protocol.CmdPtyExit)
-	time.Sleep(100 * time.Millisecond) // Give it time to process
-	l.ExitPtyMode(clientAddr)
-	// Wait for output goroutine to finish
-	select {
-	case <-outputDone:
-	case <-time.After(1 * time.Second):
+			if n > 0 {
+				data := stdinBuf[:n]
+				
+				// Check for Ctrl-D (EOF)
+				if strings.Contains(string(data), "\x04") {
+					exitPty <- true
+					return
+				}
+
+				// Send data immediately to PTY
+				encoded, err := compression.CompressToHex(data)
+				if err != nil {
+					fmt.Printf("\nError encoding input: %v\n", err)
+					return
+				}
+				l.SendCommand(clientAddr, protocol.CmdPtyData+" "+encoded)
+			}
+		}
+	}()
+
+	// Wait for exit signal
+	<-exitPty
+
+	// Exit PTY mode (unless remote already closed)
+	if !remoteClosed {
+		fmt.Println("\nExiting PTY shell...")
+		l.SendCommand(clientAddr, protocol.CmdPtyExit)
+		time.Sleep(100 * time.Millisecond) // Give it time to process
 	}
+	
+	l.ExitPtyMode(clientAddr)
+	
+	// Give goroutines a moment to finish
+	time.Sleep(100 * time.Millisecond)
 }
 
 func setRawMode() (*syscall.Termios, error) {
@@ -438,5 +466,8 @@ func setRawMode() (*syscall.Termios, error) {
 }
 
 func restoreTerminal(oldState *syscall.Termios) {
-	syscall.Syscall(syscall.SYS_IOCTL, os.Stdin.Fd(), syscall.TCSETS, uintptr(unsafe.Pointer(oldState)))
+	// Restore terminal to original state
+	if _, _, err := syscall.Syscall(syscall.SYS_IOCTL, os.Stdin.Fd(), syscall.TCSETS, uintptr(unsafe.Pointer(oldState))); err != 0 {
+		log.Printf("Warning: failed to restore terminal state: %v", err)
+	}
 }

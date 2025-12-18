@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"golang-https-rev/pkg/protocol"
@@ -30,6 +31,7 @@ type ReverseClient struct {
 	ptyFile           *os.File   // PTY file for shell
 	ptyCmd            *exec.Cmd  // Command running in PTY
 	inPtyMode         bool       // Whether currently in PTY mode
+	ptyMutex          sync.Mutex // Protects PTY state
 }
 
 // NewReverseClient creates a new reverse shell client
