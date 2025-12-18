@@ -94,9 +94,13 @@ var cmdBuffer strings.Builder
 
 for {
 // Set read deadline to allow graceful shutdown
-rc.conn.SetReadDeadline(time.Now().Add(protocol.ReadTimeout * time.Second))
+if rc.conn != nil {
+	rc.conn.SetReadDeadline(time.Now().Add(protocol.ReadTimeout * time.Second))
+}
 line, err := rc.reader.ReadString('\n')
-rc.conn.SetReadDeadline(time.Time{})
+if rc.conn != nil {
+	rc.conn.SetReadDeadline(time.Time{})
+}
 
 cmdBuffer.WriteString(line)
 

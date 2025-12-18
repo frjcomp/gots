@@ -45,16 +45,24 @@ func runClient(args []string) error {
 	log.Printf("Target: %s", target)
 	log.Printf("Max retries: %d (0 = infinite)", maxRetries)
 
-	connectWithRetry(target, maxRetries)
+	connectWithRetry(target, maxRetries, func(t string) reverseClient { return client.NewReverseClient(t) }, time.Sleep)
 	return nil
 }
 
-func connectWithRetry(target string, maxRetries int) {
+type reverseClient interface {
+	Connect() error
+	HandleCommands() error
+	Close() error
+}
+
+type clientFactory func(target string) reverseClient
+
+func connectWithRetry(target string, maxRetries int, newClient clientFactory, sleep func(time.Duration)) {
 	retries := 0
 	backoff := 5 * time.Second
 
 	for {
-		cl := client.NewReverseClient(target)
+		cl := newClient(target)
 		if err := cl.Connect(); err != nil {
 			log.Printf("Connection failed: %v", err)
 
@@ -67,7 +75,11 @@ func connectWithRetry(target string, maxRetries int) {
 			}
 
 			log.Printf("Retrying in %v... (attempt %d)", backoff, retries+1)
-			time.Sleep(backoff)
+			if sleep != nil {
+				sleep(backoff)
+			} else {
+				time.Sleep(backoff)
+			}
 			backoff *= 2
 			if backoff > 5*time.Minute {
 				backoff = 5 * time.Minute
@@ -77,7 +89,7 @@ func connectWithRetry(target string, maxRetries int) {
 
 		if err := cl.HandleCommands(); err != nil {
 			log.Printf("Connection failed: %v", err)
-			cl.Close()
+			_ = cl.Close()
 
 			if maxRetries > 0 {
 				retries++
@@ -88,7 +100,11 @@ func connectWithRetry(target string, maxRetries int) {
 			}
 
 			log.Printf("Reconnecting in %v... (attempt %d)", backoff, retries+1)
-			time.Sleep(backoff)
+			if sleep != nil {
+				sleep(backoff)
+			} else {
+				time.Sleep(backoff)
+			}
 			backoff *= 2
 			if backoff > 5*time.Minute {
 				backoff = 5 * time.Minute
