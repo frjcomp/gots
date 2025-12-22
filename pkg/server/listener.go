@@ -65,6 +65,10 @@ func (l *Listener) acceptConnections(listener net.Listener) {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			// Check if the listener was closed
+			if errors.Is(err, net.ErrClosed) || strings.Contains(err.Error(), "use of closed network connection") {
+				return
+			}
 			log.Printf("Error accepting connection: %v", err)
 			continue
 		}

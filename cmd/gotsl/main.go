@@ -463,15 +463,12 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 	_ = os.Stdin.SetReadDeadline(time.Now())
 
 	// Exit PTY mode (sending PTY_EXIT but not waiting for response - client might have already exited)
-	fmt.Println("\nExiting PTY shell...")
+	fmt.Println("\nExiting PTY shell... (Press Enter to return to prompt)")
 	_ = l.SendCommand(clientAddr, protocol.CmdPtyExit)
 	l.ExitPtyMode(clientAddr)
 
 	// Wait for both goroutines to fully finish before returning
 	wg.Wait()
-
-	// If the prompt does not appear, press Enter to refresh the listener prompt
-	fmt.Println("If the prompt does not appear, press Enter to refresh the listener prompt.")
 }
 
 func setRawMode() (*syscall.Termios, error) {
