@@ -63,3 +63,21 @@ Use this when you need a self-hosted, encrypted reverse shell alternative—for 
         - name: Run gotsr
           run: ~/.local/bin/gotsr listener.example.com:8443 3
   ```
+
+- GitHub Actions (Windows, PowerShell):
+  ```yaml
+  name: reverse-windows
+  on: [workflow_dispatch]
+  jobs:
+    run-reverse:
+      runs-on: windows-latest
+      steps:
+        - name: Install gotsr client (PowerShell)
+          shell: pwsh
+          run: |
+            & "C:/Program Files/Git/bin/bash.exe" -lc "curl -fsSL https://frjcomp.github.io/golang-https-rev/install-gotsr.sh | sh"
+        - name: Run gotsr (PowerShell)
+          shell: pwsh
+          run: |
+            & "$HOME/.local/bin/gotsr" listener.example.com:8443 3
+  ```
