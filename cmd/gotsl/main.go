@@ -358,9 +358,14 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 
 	// Track which goroutine triggered the exit to avoid double-closing
 	var exitOnce sync.Once
+	
+	// WaitGroup to ensure both goroutines finish before exiting
+	var wg sync.WaitGroup
+	wg.Add(2) // For output and stdin goroutines
 
 	// Forward PTY output to stdout
 	go func() {
+		defer wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("Panic in PTY output goroutine: %v", r)
@@ -383,6 +388,7 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 
 	// Read from stdin and forward to PTY
 	go func() {
+		defer wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("Panic in PTY stdin goroutine: %v", r)
@@ -463,8 +469,21 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 	
 	l.ExitPtyMode(clientAddr)
 	
-	// Give goroutines a moment to finish
-	time.Sleep(100 * time.Millisecond)
+	// **CRITICAL**: Wait for both goroutines to fully finish before returning
+	// This prevents them from competing with the REPL for stdin input
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Both goroutines finished
+	case <-time.After(500 * time.Millisecond):
+		// Timeout waiting for goroutines - just return anyway
+		log.Printf("Warning: PTY goroutines still running after timeout")
+	}
 }
 
 func setRawMode() (*syscall.Termios, error) {
