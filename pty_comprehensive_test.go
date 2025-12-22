@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -17,6 +18,9 @@ import (
 func TestPtyComprehensive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
+	}
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY not supported on Windows")
 	}
 
 	port := freePort(t)

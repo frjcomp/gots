@@ -5,6 +5,7 @@ import (
 "bytes"
 "os"
 "path/filepath"
+"runtime"
 "testing"
 
 "golang-https-rev/pkg/compression"
@@ -595,6 +596,9 @@ func TestHandleEndUploadMultipleChunks(t *testing.T) {
 // TestPtyModeReentry tests that PTY mode can be entered and exited multiple times
 // without "input/output error" or goroutine leaks
 func TestPtyModeReentry(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY not supported on Windows")
+	}
 	// Test entering and exiting PTY mode 3 times
 	numRetries := 3
 	
