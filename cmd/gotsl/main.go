@@ -469,6 +469,9 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 
 	// Wait for both goroutines to fully finish before returning
 	wg.Wait()
+
+	// If the prompt does not appear, press Enter to refresh the listener prompt
+	fmt.Println("If the prompt does not appear, press Enter to refresh the listener prompt.")
 }
 
 func setRawMode() (*syscall.Termios, error) {
