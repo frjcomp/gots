@@ -1,14 +1,16 @@
 package client
 
 import (
-"bufio"
-"bytes"
-"os"
-"path/filepath"
-"testing"
+	"bufio"
+	"bytes"
+	"io"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
 
-"golang-https-rev/pkg/compression"
-"golang-https-rev/pkg/protocol"
+	"golang-https-rev/pkg/compression"
+	"golang-https-rev/pkg/protocol"
 )
 
 // createMockClient creates a client with mock readers/writers for testing
@@ -699,4 +701,132 @@ func TestPtyDataEncoding(t *testing.T) {
 	}
 	
 	t.Logf("✓ PTY data encoding test passed")
+}
+
+// TestHandlePtyDataCommandCtrlD tests Ctrl-D translation on Windows
+func TestHandlePtyDataCommandCtrlD(t *testing.T) {
+	// Skip on non-Windows since we only translate on Windows
+	if runtime.GOOS != "windows" {
+		t.Skip("Ctrl-D translation only applies on Windows")
+	}
+
+	client, _ := createMockClient()
+	
+	// Setup PTY mode
+	client.inPtyMode = true
+	
+	// Create a mock PTY file (use a temp file as stand-in)
+	tmpFile, err := os.CreateTemp("", "pty-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+	
+	client.ptyFile = tmpFile
+	
+	// Test data containing Ctrl-D (0x04)
+	testData := []byte("test\x04more")
+	
+	// Compress and encode
+	encoded, err := compression.CompressToHex(testData)
+	if err != nil {
+		t.Fatalf("CompressToHex failed: %v", err)
+	}
+	
+	// Create command
+	command := protocol.CmdPtyData + " " + encoded
+	
+	// Handle the command
+	err = client.handlePtyDataCommand(command)
+	if err != nil {
+		t.Fatalf("handlePtyDataCommand failed: %v", err)
+	}
+	
+	// Read what was written to the mock PTY file
+	tmpFile.Seek(0, 0)
+	written, err := io.ReadAll(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to read from temp file: %v", err)
+	}
+	
+	// Verify Ctrl-D was translated to "exit\r\n"
+	expectedData := []byte("testexit\r\nmore")
+	if !bytes.Equal(written, expectedData) {
+		t.Errorf("Ctrl-D translation failed.\nExpected: %q\nGot: %q", expectedData, written)
+	}
+	
+	t.Logf("✓ Ctrl-D translation test passed on Windows")
+}
+
+// TestHandlePtyDataCommandNoCtrlD tests normal data doesn't get modified
+func TestHandlePtyDataCommandNoCtrlD(t *testing.T) {
+	client, _ := createMockClient()
+	
+	// Setup PTY mode
+	client.inPtyMode = true
+	
+	// Create a mock PTY file
+	tmpFile, err := os.CreateTemp("", "pty-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp file: %v", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+	
+	client.ptyFile = tmpFile
+	
+	// Test data without Ctrl-D
+	testData := []byte("normal text without ctrl-d")
+	
+	// Compress and encode
+	encoded, err := compression.CompressToHex(testData)
+	if err != nil {
+		t.Fatalf("CompressToHex failed: %v", err)
+	}
+	
+	// Create command
+	command := protocol.CmdPtyData + " " + encoded
+	
+	// Handle the command
+	err = client.handlePtyDataCommand(command)
+	if err != nil {
+		t.Fatalf("handlePtyDataCommand failed: %v", err)
+	}
+	
+	// Read what was written
+	tmpFile.Seek(0, 0)
+	written, err := io.ReadAll(tmpFile)
+	if err != nil {
+		t.Fatalf("Failed to read from temp file: %v", err)
+	}
+	
+	// Verify data is unchanged
+	if !bytes.Equal(written, testData) {
+		t.Errorf("Normal data was modified.\nExpected: %q\nGot: %q", testData, written)
+	}
+	
+	t.Logf("✓ Normal PTY data handling test passed")
+}
+
+// TestHandlePtyDataCommandNotInPtyMode tests error when not in PTY mode
+func TestHandlePtyDataCommandNotInPtyMode(t *testing.T) {
+	client, _ := createMockClient()
+	
+	// Don't set PTY mode
+	client.inPtyMode = false
+	
+	// Try to handle PTY data command
+	command := protocol.CmdPtyData + " test"
+	err := client.handlePtyDataCommand(command)
+	
+	// Should return error
+	if err == nil {
+		t.Error("Expected error when not in PTY mode, got nil")
+	}
+	if err.Error() != "not in PTY mode" {
+		t.Errorf("Expected 'not in PTY mode' error, got: %v", err)
+	}
+	
+	t.Logf("✓ PTY mode validation test passed")
 }

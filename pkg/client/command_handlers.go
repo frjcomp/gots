@@ -251,6 +251,24 @@ func (rc *ReverseClient) handlePtyDataCommand(command string) error {
 		return fmt.Errorf("failed to decompress PTY data: %v", err)
 	}
 	
+	// Check for Ctrl-D (0x04) on Windows and translate to 'exit\r\n'
+	// Windows cmd.exe doesn't recognize Ctrl-D as EOF, so we send 'exit' instead
+	if runtime.GOOS == "windows" && len(data) > 0 {
+		for i, b := range data {
+			if b == 0x04 {
+				// Replace Ctrl-D with 'exit' command
+				exitCmd := []byte("exit\r\n")
+				// Construct new data: everything before Ctrl-D + 'exit' + everything after Ctrl-D
+				newData := make([]byte, 0, len(data)-1+len(exitCmd))
+				newData = append(newData, data[:i]...)
+				newData = append(newData, exitCmd...)
+				newData = append(newData, data[i+1:]...)
+				data = newData
+				break // Only handle first Ctrl-D
+			}
+		}
+	}
+	
 	// Use platform-specific wrapper for writing
 	wrapper := wrapPtyFile(ptyFile)
 	_, err = wrapper.Write(data)

@@ -85,6 +85,13 @@ func startPty(cmd *exec.Cmd) (*os.File, error) {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
+			// Check if we should stop
+			select {
+			case <-done:
+				return
+			default:
+			}
+			
 			n, err := cpty.Read(buf)
 			if err != nil {
 				closeOnce.Do(func() {
@@ -94,7 +101,13 @@ func startPty(cmd *exec.Cmd) (*os.File, error) {
 				return
 			}
 			if n > 0 {
-				w.Write(buf[:n])
+				// Check again before writing in case we just got shutdown signal
+				select {
+				case <-done:
+					return
+				default:
+					w.Write(buf[:n])
+				}
 			}
 		}
 	}()
@@ -103,7 +116,7 @@ func startPty(cmd *exec.Cmd) (*os.File, error) {
 	go func() {
 		// Wait for the process to exit (no timeout - blocks until exit)
 		cpty.Wait(context.Background())
-		// Process exited, close the write pipe to signal EOF to readers
+		// Process exited, immediately close channels to stop data flow
 		closeOnce.Do(func() {
 			close(done)
 			w.Close()
