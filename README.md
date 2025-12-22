@@ -4,6 +4,8 @@
 
 # GOTS - Golang TCP/TLS (Reverse) Shell - For Pipeleek
 
+> **⚠️ Disclaimer**: This project was entirely generated using AI (GitHub Copilot). Use at your own risk in production environments.
+
 Minimal, encrypted reverse shell over raw TCP with TLS.
 
 Use this when you need a self-hosted, encrypted reverse shell alternative—for example, when tools like [sshx](https://sshx.io/) cannot be used due to customer concerns about data residency or third-party hosting requirements.
