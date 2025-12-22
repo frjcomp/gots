@@ -228,7 +228,7 @@ func TestClientExitCommand(t *testing.T) {
 // Helper functions
 
 func createServerForTest(t *testing.T) *server.Listener {
-	cert, err := certs.GenerateSelfSignedCert()
+	cert, _, err := certs.GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("Failed to generate certificate: %v", err)
 	}

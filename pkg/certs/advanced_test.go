@@ -14,7 +14,7 @@ func TestGenerateSelfSignedCertInvalidKeySize(t *testing.T) {
 	// Use a small buffer to simulate key generation failure
 	rand.Reader = &limitedReader{remaining: 10}
 	
-	_, err := GenerateSelfSignedCert()
+	_, _, err := GenerateSelfSignedCert()
 	if err == nil {
 		t.Fatal("expected error with insufficient random data")
 	}
@@ -38,7 +38,7 @@ func (l *limitedReader) Read(p []byte) (n int, err error) {
 }
 
 func TestCertificateValidityPeriod(t *testing.T) {
-	cert, err := GenerateSelfSignedCert()
+	cert, _, err := GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestCertificateValidityPeriod(t *testing.T) {
 }
 
 func TestCertificateOrganization(t *testing.T) {
-	cert, err := GenerateSelfSignedCert()
+	cert, _, err := GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatal(err)
 	}

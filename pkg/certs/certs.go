@@ -15,10 +15,11 @@ import (
 )
 
 // GenerateSelfSignedCert creates a self-signed TLS certificate on the fly
-func GenerateSelfSignedCert() (tls.Certificate, error) {
+// Returns the certificate and its SHA256 fingerprint
+func GenerateSelfSignedCert() (tls.Certificate, string, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("failed to generate private key: %v", err)
+		return tls.Certificate{}, "", fmt.Errorf("failed to generate private key: %v", err)
 	}
 
 	notBefore := time.Now()
@@ -26,7 +27,7 @@ func GenerateSelfSignedCert() (tls.Certificate, error) {
 
 	serialNumber, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("failed to generate serial number: %v", err)
+		return tls.Certificate{}, "", fmt.Errorf("failed to generate serial number: %v", err)
 	}
 
 	template := x509.Certificate{
@@ -44,18 +45,22 @@ func GenerateSelfSignedCert() (tls.Certificate, error) {
 
 	certDER, err := x509.CreateCertificate(rand.Reader, &template, &template, &privateKey.PublicKey, privateKey)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("failed to create certificate: %v", err)
+		return tls.Certificate{}, "", fmt.Errorf("failed to create certificate: %v", err)
 	}
+
+	// Calculate fingerprint from DER bytes
+	hash := sha256.Sum256(certDER)
+	fingerprint := hex.EncodeToString(hash[:])
 
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
 
 	cert, err := tls.X509KeyPair(certPEM, keyPEM)
 	if err != nil {
-		return tls.Certificate{}, fmt.Errorf("failed to load certificate: %v", err)
+		return tls.Certificate{}, "", fmt.Errorf("failed to load certificate: %v", err)
 	}
 
-	return cert, nil
+	return cert, fingerprint, nil
 }
 
 // GetCertificateFingerprint returns the SHA256 fingerprint of a certificate

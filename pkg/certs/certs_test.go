@@ -7,7 +7,7 @@ import (
 
 // TestGenerateSelfSignedCert tests certificate generation
 func TestGenerateSelfSignedCert(t *testing.T) {
-	cert, err := GenerateSelfSignedCert()
+	cert, fingerprint, err := GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("Failed to generate certificate: %v", err)
 	}
@@ -16,12 +16,17 @@ func TestGenerateSelfSignedCert(t *testing.T) {
 		t.Fatal("Certificate has no data")
 	}
 
+	// Fingerprint should be 64 hex characters (SHA256)
+	if len(fingerprint) != 64 {
+		t.Errorf("fingerprint should be 64 characters, got %d", len(fingerprint))
+	}
+
 	t.Log("✓ Self-signed certificate generated successfully")
 }
 
 // TestCertificateValidity tests certificate has required properties
 func TestCertificateValidity(t *testing.T) {
-	cert, err := GenerateSelfSignedCert()
+	cert, _, err := GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("Failed to generate certificate: %v", err)
 	}
@@ -39,14 +44,14 @@ func TestCertificateValidity(t *testing.T) {
 
 // TestMultipleCertificates tests that multiple certificates can be generated
 func TestMultipleCertificates(t *testing.T) {
-	cert1, err := GenerateSelfSignedCert()
+	cert1, _, err := GenerateSelfSignedCert()
 	if err != nil {
-		t.Fatalf("Failed to generate first certificate: %v", err)
+		t.Fatalf("failed to generate first certificate: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
-	cert2, err := GenerateSelfSignedCert()
+	cert2, _, err := GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("Failed to generate second certificate: %v", err)
 	}

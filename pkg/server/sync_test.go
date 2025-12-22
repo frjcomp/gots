@@ -309,7 +309,7 @@ func TestNoResponseChannelDataRace(t *testing.T) {
 
 // Helper function to create a test listener with specified port
 func createTestListener(t *testing.T, port int) *Listener {
-	cert, err := certs.GenerateSelfSignedCert()
+	cert, _, err := certs.GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("Failed to generate certificate: %v", err)
 	}

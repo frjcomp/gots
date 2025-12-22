@@ -12,7 +12,7 @@ import (
 
 // createTestListenerHelper creates a listener with a dynamic port (OS selects available port)
 func createTestListenerHelper(t *testing.T) *Listener {
-	cert, err := certs.GenerateSelfSignedCert()
+	cert, _, err := certs.GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("Failed to generate cert: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestGetResponseFromInvalidClient(t *testing.T) {
 
 // TestListenerStartInvalidPort tests error when starting with invalid port
 func TestListenerStartInvalidPort(t *testing.T) {
-	cert, err := certs.GenerateSelfSignedCert()
+	cert, _, err := certs.GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -10,7 +10,7 @@ import (
 
 // TestListenerCreation tests creating a new listener
 func TestListenerCreation(t *testing.T) {
-	cert, err := certs.GenerateSelfSignedCert()
+	cert, _, err := certs.GenerateSelfSignedCert()
 	if err != nil {
 		t.Fatalf("Failed to generate certificate: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestListenerCreation(t *testing.T) {
 
 // TestGetClients tests getting client list
 func TestGetClients(t *testing.T) {
-	cert, _ := certs.GenerateSelfSignedCert()
+	cert, _, _ := certs.GenerateSelfSignedCert()
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
@@ -52,7 +52,7 @@ func TestGetClients(t *testing.T) {
 
 // TestSendCommand tests sending a command
 func TestSendCommand(t *testing.T) {
-	cert, _ := certs.GenerateSelfSignedCert()
+	cert, _, _ := certs.GenerateSelfSignedCert()
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
@@ -71,7 +71,7 @@ func TestSendCommand(t *testing.T) {
 
 // TestGetResponse tests getting a response
 func TestGetResponse(t *testing.T) {
-	cert, _ := certs.GenerateSelfSignedCert()
+	cert, _, _ := certs.GenerateSelfSignedCert()
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
