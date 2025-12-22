@@ -123,9 +123,9 @@ func TestListenerReverseInteractiveSession(t *testing.T) {
 	waitForContains(t, reverse, "Max retries (1) reached. Exiting.", 10*time.Second)
 }
 
-// TestLinerHistoryFeature tests that the liner history works and multiple file operations
-// can be performed in sequence without issues.
-func TestLinerHistoryFeature(t *testing.T) {
+// TestSequentialCommandOperations ensures multiple file operations can be performed
+// in sequence without issues using the listener REPL.
+func TestSequentialCommandOperations(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}

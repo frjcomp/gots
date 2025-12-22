@@ -342,9 +342,9 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 		// Clear any read deadlines on stdin
 		os.Stdin.SetReadDeadline(time.Time{})
 		
-		// Restore terminal state
-		// Restore terminal state to what it was before PTY mode
-		// The liner library manages echo and line editing, so we just restore the saved state
+    	// Restore terminal state
+    	// Restore terminal state to what it was before PTY mode
+    	// The REPL handles input normally outside PTY mode; restore the saved state
 		if oldState != nil {
 			restoreTerminal(oldState)
 		}
