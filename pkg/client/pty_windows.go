@@ -4,6 +4,7 @@
 package client
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -75,7 +76,7 @@ func startPty(cmd *exec.Cmd) (*os.File, error) {
 		writePipe: w,
 	}
 
-	// Forward ConPTY output to the pipe
+	// Forward ConPTY output to the pipe and monitor process exit
 	go func() {
 		buf := make([]byte, 4096)
 		for {
@@ -88,6 +89,14 @@ func startPty(cmd *exec.Cmd) (*os.File, error) {
 				w.Write(buf[:n])
 			}
 		}
+	}()
+
+	// Monitor process exit and close the pipe when it exits
+	go func() {
+		// Wait for the process to exit (no timeout - blocks until exit)
+		cpty.Wait(context.Background())
+		// Process exited, close the write pipe to signal EOF to readers
+		w.Close()
 	}()
 
 	// We need to return something that satisfies *os.File interface

@@ -42,8 +42,7 @@ func TestPtyExitCommand(t *testing.T) {
 	send(listener, "exit\n")
 	
 	// The listener should detect the remote shell exited
-	// Windows ConPTY may take longer to detect shell exit
-	waitForContains(t, listener, "[Remote shell exited]", 10*time.Second)
+	waitForContains(t, listener, "[Remote shell exited]", 5*time.Second)
 	
 	// The listener should return to the prompt and be responsive
 	waitForContains(t, listener, "listener>", 5*time.Second)
