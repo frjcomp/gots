@@ -4,11 +4,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"bufio"
-	"io"
 	"log"
 	"net"
 	"os"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unsafe"
@@ -353,19 +353,30 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 		fmt.Println()
 	}()
 
-	// Channel to signal we should exit
-	exitPty := make(chan bool, 1)
-	remoteClosed := false
+	// Channel to signal we should exit (buffered to prevent blocking)
+	exitPty := make(chan bool, 2) // Buffered for output and stdin goroutines
+
+	// Track which goroutine triggered the exit to avoid double-messaging
+	var exitOnce sync.Once
+	remoteExited := false
 
 	// Forward PTY output to stdout
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in PTY output goroutine: %v", r)
+			}
+		}()
+		
 		for {
 			data, ok := <-ptyDataChan
 			if !ok {
 				// Channel closed - remote PTY exited
 				fmt.Printf("\r\n[Remote shell exited]\r\n")
-				remoteClosed = true
-				exitPty <- true
+				exitOnce.Do(func() {
+					remoteExited = true
+					exitPty <- true
+				})
 				return
 			}
 			os.Stdout.Write(data)
@@ -374,13 +385,16 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 
 	// Read from stdin and forward to PTY
 	go func() {
-		stdinBuf := make([]byte, 1024)
-		
 		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("Panic in PTY stdin goroutine: %v", r)
+			}
 			// Ensure deadline is cleared when goroutine exits
 			os.Stdin.SetReadDeadline(time.Time{})
 		}()
-		
+
+		stdinBuf := make([]byte, 1024)
+
 		for {
 			select {
 			case <-exitPty:
@@ -389,29 +403,28 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 			default:
 				// Continue reading
 			}
-			
+
 			// Set a read timeout so we can check exitPty periodically
 			os.Stdin.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			n, err := os.Stdin.Read(stdinBuf)
-			
+
 			if err != nil {
 				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
 					// Timeout, check if we should exit
 					continue
 				}
-				if err != io.EOF {
-					// Real error
-					return
-				}
+				// EOF or error - exit gracefully
 				return
 			}
 
 			if n > 0 {
 				data := stdinBuf[:n]
-				
+
 				// Check for Ctrl-D (EOF)
 				if strings.Contains(string(data), "\x04") {
-					exitPty <- true
+					exitOnce.Do(func() {
+						exitPty <- true
+					})
 					return
 				}
 
@@ -426,11 +439,11 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 		}
 	}()
 
-	// Wait for exit signal
+	// Wait for exit signal (read one since buffer is 2)
 	<-exitPty
 
 	// Exit PTY mode (unless remote already closed)
-	if !remoteClosed {
+	if !remoteExited {
 		fmt.Println("\nExiting PTY shell...")
 		l.SendCommand(clientAddr, protocol.CmdPtyExit)
 		time.Sleep(100 * time.Millisecond) // Give it time to process
