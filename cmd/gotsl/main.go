@@ -29,8 +29,6 @@ func printHeader() {
 	fmt.Println(`╚██████╔╝╚██████╔╝   ██║   ╚██████╔╝███████╗ `)
 	fmt.Println(` ╚═════╝  ╚═════╝    ╚═╝    ╚═════╝ ╚══════╝ `)
 	fmt.Println()
-	fmt.Println("  GOTSL - Go TLS Listener")
-	fmt.Println()
 }
 
 func main() {
