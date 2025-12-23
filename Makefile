@@ -40,8 +40,8 @@ $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
 build: $(BIN_DIR)
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_GOTSL) ./cmd/gotsl
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_GOTSR) ./cmd/gotsr
+	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_GOTSL) ./cmd/gotsl
+	CGO_ENABLED=0 $(GO) build -ldflags "$(LDFLAGS)" -o $(BIN_GOTSR) ./cmd/gotsr
 
 test:
 	$(GO) test ./... -v
