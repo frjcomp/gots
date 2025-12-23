@@ -1,10 +1,10 @@
 package main
 
 import (
+	"bufio"
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"bufio"
 	"log"
 	"net"
 	"os"
@@ -60,7 +60,7 @@ func runListener(args []string, useSharedSecret bool) error {
 	if err != nil {
 		return fmt.Errorf("failed to generate certificate: %w", err)
 	}
-	
+
 	log.Printf("Certificate generated successfully (SHA256: %s)", fingerprint)
 
 	var secret string
@@ -322,7 +322,7 @@ func handleDownloadGlobal(l listenerInterface, currentClient, remotePath, localP
 
 func enterPtyShell(l *server.Listener, clientAddr string) {
 	fmt.Printf("Entering PTY shell with %s...\n", clientAddr)
-	
+
 	// Send PTY_MODE command
 	if err := l.SendCommand(clientAddr, protocol.CmdPtyMode); err != nil {
 		fmt.Printf("Error entering PTY mode: %v\n", err)
@@ -361,12 +361,16 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 	defer func() {
 		// Clear any read deadlines on stdin
 		os.Stdin.SetReadDeadline(time.Time{})
-		
+
 		// Restore terminal state
 		if oldState != nil {
 			term.Restore(fd, oldState)
+			// Flush any raw-mode keystrokes still buffered so they don't leak into the prompt
+			if err := flushStdin(); err != nil {
+				log.Printf("Warning: failed to flush stdin after PTY exit: %v", err)
+			}
 		}
-		
+
 		// Force a newline to reset the terminal display
 		fmt.Println()
 	}()
@@ -376,7 +380,7 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 
 	// Track which goroutine triggered the exit to avoid double-closing
 	var exitOnce sync.Once
-	
+
 	// WaitGroup to ensure both goroutines finish before exiting
 	var wg sync.WaitGroup
 	wg.Add(2) // For output and stdin goroutines
@@ -488,5 +492,3 @@ func enterPtyShell(l *server.Listener, clientAddr string) {
 	// Wait for both goroutines to fully finish before returning
 	wg.Wait()
 }
-
-
