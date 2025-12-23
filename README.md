@@ -38,7 +38,7 @@ Use this when you need a self-hosted, encrypted reverse shell alternative—for 
 - In a session: run shell commands; `Ctrl D` to return.
 
 **Quick tips:**
-First connection without a fingerprint will still work with a self-signed cert; the client (`gotsr`) logs a warning and prints the certificate fingerprint. If you use pinning, obtain and verify the fingerprint via a trusted channel (e.g., printed by `gotsl -s`) before using `--cert-fingerprint`.
+First connection without a fingerprint will still work with a self-signed cert; the client (`gotsr`) logs a warning and prints the certificate fingerprint. If you use pinning, obtain and verify the fingerprint via a trusted channel (e.g., printed by `gotsl`) before using `--cert-fingerprint`.
 
 
 ### Shared Secret Authentication
@@ -67,7 +67,7 @@ The listener will log a warning if the client fails to authenticate with the cor
 ### Certificate Verification & Pinning
 The client validates the server certificate during the TLS handshake:
 
-- Pinning (**recommended**): If `--cert-fingerprint` is provided, the client pins to the leaf certificate's SHA256 fingerprint (DER) and rejects mismatches (prevents MITM).
+- Pinning (**recommended**): If `--cert-fingerprint` is provided, the client pins to the leaf certificate's SHA256 fingerprint (DER) and rejects mismatches (prevents MITM). The generated fingerprint is printed at startup by the listener.
 - CA-signed certs: If no fingerprint is provided and the certificate is CA-signed and valid, the connection is accepted.
 - Self-signed without fingerprint: The connection is allowed, and the client logs a clear security warning and prints the server fingerprint. If you choose to pin, obtain and verify the fingerprint via a trusted channel before using `--cert-fingerprint`.
 
