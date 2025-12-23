@@ -96,7 +96,6 @@ func (rc *ReverseClient) Connect() error {
 			fingerprint := hex.EncodeToString(hash[:])
 			log.Printf("⚠️  WARNING: Self-signed certificate detected without fingerprint verification!")
 			log.Printf("⚠️  Certificate fingerprint: %s", fingerprint)
-			log.Printf("⚠️  Or use -s flag on listener to display the required fingerprint")
 			return nil  // Allow connection despite security risk
 		},
 	}
