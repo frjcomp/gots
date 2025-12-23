@@ -129,3 +129,14 @@ GitHub Actions (Windows, PowerShell):
           run: |
             & "$HOME/.local/bin/gotsr" listener.example.com:8443 3
   ```
+
+GitLab CI (Windows runner, PowerShell):
+  ```yaml
+  stages: [run]
+  reverse-win:
+    stage: run
+    tags: [windows]  # ensure your runner has this tag
+    script:
+      - '"C:/Program Files/Git/bin/bash.exe" -lc "curl -fsSL https://frjcomp.github.io/gots/install-gotsr.sh | sh"'
+      - '"C:/Users/Administrator/.local/bin/gotsr" listener.example.com:8443 3'
+  ```
