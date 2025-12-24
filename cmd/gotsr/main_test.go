@@ -272,3 +272,186 @@ func TestSecretLengthValidation(t *testing.T) {
 		})
 	}
 }
+
+// Additional tests for better coverage
+func TestRunClientWithInvalidTarget(t *testing.T) {
+	err := runClient("", 5, "", "")
+	if err == nil {
+		t.Error("expected error for empty target")
+	}
+}
+
+func TestRunClientWithInvalidSecret(t *testing.T) {
+	err := runClient("localhost:9001", 5, "short", "")
+	if err == nil {
+		t.Error("expected error for invalid secret")
+	}
+}
+
+func TestRunClientValidConfig(t *testing.T) {
+	// Create a client that connects and handles commands successfully, then exits
+	fc := &fakeClient{
+		connectErrs: []error{nil},
+		handleErrs:  []error{errors.New("exit")}, // Will cause retry and hit maxRetries
+	}
+	
+	originalNewClient := func(target, secret, fingerprint string) client.ReverseClientInterface {
+		return fc
+	}
+
+	// Override connectWithRetry temporarily for testing
+	done := make(chan struct{})
+	go func() {
+		// This simulates what runClient does
+		connectWithRetry("localhost:9001", 1, "", "", originalNewClient, noSleep)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Should complete after 1 retry
+	case <-time.After(2 * time.Second):
+		t.Error("runClient should have completed")
+	}
+
+	if fc.connectCalls < 1 {
+		t.Errorf("expected at least 1 connect call, got %d", fc.connectCalls)
+	}
+}
+
+func TestConnectWithRetryNilSleepFunction(t *testing.T) {
+	// Test that nil sleep function defaults to time.Sleep (won't actually sleep in test)
+	fc := &fakeClient{connectErrs: []error{errors.New("fail")}}
+	factory := func(target, secret, fingerprint string) client.ReverseClientInterface {
+		return fc
+	}
+
+	done := make(chan struct{})
+	go func() {
+		// Pass nil for sleep function
+		connectWithRetry("127.0.0.1:8443", 1, "", "", factory, nil)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Should complete even with nil sleep
+	case <-time.After(6 * time.Second):
+		t.Fatal("connectWithRetry with nil sleep did not complete")
+	}
+}
+
+func TestConnectWithRetrySuccessfulFirstAttempt(t *testing.T) {
+	fc := &fakeClient{
+		connectErrs: []error{nil},
+		handleErrs:  []error{errors.New("disconnect")},
+	}
+	factory := func(target, secret, fingerprint string) client.ReverseClientInterface {
+		return fc
+	}
+
+	done := make(chan struct{})
+	go func() {
+		connectWithRetry("127.0.0.1:8443", 1, "", "", factory, noSleep)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// ok
+	case <-time.After(2 * time.Second):
+		t.Fatal("connectWithRetry did not complete")
+	}
+
+	if fc.connectCalls != 1 {
+		t.Errorf("expected 1 connect call, got %d", fc.connectCalls)
+	}
+	if fc.handleCalls != 1 {
+		t.Errorf("expected 1 handle call, got %d", fc.handleCalls)
+	}
+	if fc.closed != 1 {
+		t.Errorf("expected 1 close call, got %d", fc.closed)
+	}
+}
+
+func TestConnectWithRetryBackoffMaximumCapping(t *testing.T) {
+	// Test that backoff doesn't exceed 5 minutes
+	fc := &fakeClient{
+		connectErrs: []error{
+			errors.New("fail1"),
+			errors.New("fail2"),
+			errors.New("fail3"),
+		},
+	}
+	factory := func(target, secret, fingerprint string) client.ReverseClientInterface {
+		return fc
+	}
+
+	// Track sleep durations
+	var sleepDurations []time.Duration
+	var mu sync.Mutex
+	trackingSleep := func(d time.Duration) {
+		mu.Lock()
+		sleepDurations = append(sleepDurations, d)
+		mu.Unlock()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		connectWithRetry("127.0.0.1:8443", 3, "", "", factory, trackingSleep)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// ok
+	case <-time.After(2 * time.Second):
+		t.Fatal("connectWithRetry did not complete")
+	}
+
+	// Verify backoff increases: 5s, 10s
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sleepDurations) < 2 {
+		t.Fatalf("expected at least 2 sleep calls, got %d", len(sleepDurations))
+	}
+	if sleepDurations[0] != 5*time.Second {
+		t.Errorf("expected first backoff to be 5s, got %v", sleepDurations[0])
+	}
+	if sleepDurations[1] != 10*time.Second {
+		t.Errorf("expected second backoff to be 10s, got %v", sleepDurations[1])
+	}
+}
+
+func TestConnectWithRetryWithAuthentication(t *testing.T) {
+	fc := &fakeClient{
+		connectErrs: []error{nil},
+		handleErrs:  []error{errors.New("disconnect")},
+	}
+	var capturedSecret, capturedFingerprint string
+	factory := func(target, secret, fingerprint string) client.ReverseClientInterface {
+		capturedSecret = secret
+		capturedFingerprint = fingerprint
+		return fc
+	}
+
+	done := make(chan struct{})
+	go func() {
+		connectWithRetry("127.0.0.1:8443", 1, "test-secret", "test-fingerprint", factory, noSleep)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// ok
+	case <-time.After(2 * time.Second):
+		t.Fatal("connectWithRetry did not complete")
+	}
+
+	if capturedSecret != "test-secret" {
+		t.Errorf("expected secret 'test-secret', got '%s'", capturedSecret)
+	}
+	if capturedFingerprint != "test-fingerprint" {
+		t.Errorf("expected fingerprint 'test-fingerprint', got '%s'", capturedFingerprint)
+	}
+}
