@@ -40,13 +40,16 @@ type ReverseClient struct {
 	ptyMutex          sync.Mutex // Protects PTY state
 }
 
-var globalSessionID string
+var (
+	globalSessionID  string
+	sessionIDOnce    sync.Once
+)
 
 // GetSessionID returns the process-wide session identifier used by this gotsr instance.
 func GetSessionID() string {
-	if globalSessionID == "" {
+	sessionIDOnce.Do(func() {
 		globalSessionID = generateShortID()
-	}
+	})
 	return globalSessionID
 }
 
