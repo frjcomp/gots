@@ -217,6 +217,38 @@ func (l *Listener) handleClient(conn net.Conn) {
 				continue
 			}
 
+			// Check for SOCKS data from client (to be written to local conn)
+			if strings.HasPrefix(currentLine, protocol.CmdSocksData+" ") {
+				line := strings.TrimSpace(currentLine)
+				parts := strings.Fields(line)
+				// Expect: SOCKS_DATA <socks_id> <conn_id> <base64_data>
+				if len(parts) >= 4 {
+					socksID := parts[1]
+					connID := parts[2]
+					// Reconstruct encoded data without relying on Fields join
+					prefix := protocol.CmdSocksData + " " + socksID + " " + connID + " "
+					encoded := strings.TrimPrefix(line, prefix)
+					// Write decoded data to the local SOCKS connection
+					if err := l.socksManager.HandleSocksData(socksID, connID, encoded); err != nil {
+						log.Printf("[-] SOCKS %s conn %s handle data error: %v", socksID, connID, err)
+					}
+				}
+				responseBuffer.Reset()
+				continue
+			}
+
+			// Check for SOCKS connection close from client
+			if strings.HasPrefix(currentLine, protocol.CmdSocksClose+" ") {
+				parts := strings.Fields(strings.TrimSpace(currentLine))
+				if len(parts) >= 3 {
+					socksID := parts[1]
+					connID := parts[2]
+					l.socksManager.HandleSocksClose(socksID, connID)
+				}
+				responseBuffer.Reset()
+				continue
+			}
+
 			// Check for PTY data
 			if strings.HasPrefix(currentLine, protocol.CmdPtyData+" ") {
 				encoded := strings.TrimPrefix(currentLine, protocol.CmdPtyData+" ")

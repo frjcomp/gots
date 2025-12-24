@@ -261,7 +261,6 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 
 // relayData relays data between local connection and remote
 func (sm *SocksManager) relayData(proxy *SocksProxy, connID string, conn net.Conn) {
-	log.Printf("[+] SOCKS %s conn %s: starting data relay", proxy.ID, connID)
 	buffer := make([]byte, 32768)
 	for {
 		n, err := conn.Read(buffer)
@@ -273,7 +272,6 @@ func (sm *SocksManager) relayData(proxy *SocksProxy, connID string, conn net.Con
 		}
 
 		if n > 0 {
-			log.Printf("[*] SOCKS %s conn %s: relaying %d bytes from client", proxy.ID, connID, n)
 			// Encode and send to client
 			encoded := base64.StdEncoding.EncodeToString(buffer[:n])
 			proxy.sendFunc(fmt.Sprintf("%s %s %s %s\n", protocol.CmdSocksData, proxy.ID, connID, encoded))

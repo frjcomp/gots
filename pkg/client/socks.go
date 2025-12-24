@@ -61,7 +61,6 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 
 	// Signal server that connection is ready
 	sh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksOk, socksID, connID))
-	log.Printf("[+] SOCKS %s conn %s: sent SOCKS_OK, starting relay", socksID, connID)
 
 	// Start reading from target and sending back
 	go sh.readFromTarget(socksID, connID, conn)
@@ -92,7 +91,6 @@ func (sh *SocksHandler) readFromTarget(socksID, connID string, conn net.Conn) {
 		}
 
 		if n > 0 {
-			log.Printf("[*] SOCKS %s conn %s: relaying %d bytes from target", socksID, connID, n)
 			// Encode and send data back
 			encoded := base64.StdEncoding.EncodeToString(buffer[:n])
 			sh.sendFunc(fmt.Sprintf("%s %s %s %s\n", protocol.CmdSocksData, socksID, connID, encoded))
