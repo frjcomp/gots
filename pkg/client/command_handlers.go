@@ -408,16 +408,11 @@ func (rc *ReverseClient) processCommand(command string) (shouldContinue bool, er
 		return true, rc.handlePingCommand()
 	}
 
-	// Log command but avoid logging data payloads for upload chunks and SOCKS data
+	// Log command but avoid logging data payloads for upload chunks and streaming data
 	if strings.HasPrefix(command, protocol.CmdUploadChunk+" ") {
 		log.Printf("Received command: %s <data>", protocol.CmdUploadChunk)
 	} else if strings.HasPrefix(command, protocol.CmdSocksData+" ") {
-		parts := strings.Fields(command)
-		if len(parts) >= 3 {
-			log.Printf("Received command: %s %s %s <data>", parts[0], parts[1], parts[2])
-		} else {
-			log.Printf("Received command: %s <data>", protocol.CmdSocksData)
-		}
+		// Skip logging SOCKS_DATA for performance (high frequency)
 	} else {
 		log.Printf("Received command: %s", command)
 	}
