@@ -14,6 +14,7 @@ import (
 
 	"github.com/frjcomp/gots/pkg/certs"
 	"github.com/frjcomp/gots/pkg/compression"
+	"github.com/frjcomp/gots/pkg/config"
 	"github.com/frjcomp/gots/pkg/protocol"
 	"github.com/frjcomp/gots/pkg/server"
 	"github.com/frjcomp/gots/pkg/version"
@@ -33,25 +34,37 @@ func printHeader() {
 
 func main() {
 	var useSharedSecret bool
+	var port string
+	var networkInterface string
+
 	flag.BoolVar(&useSharedSecret, "s", false, "Enable shared secret authentication")
 	flag.BoolVar(&useSharedSecret, "shared-secret", false, "Enable shared secret authentication")
+	flag.StringVar(&port, "port", "", "Port to listen on (default: 9001)")
+	flag.StringVar(&networkInterface, "interface", "", "Network interface to bind to (default: 0.0.0.0)")
 	flag.Parse()
 
+	// For backward compatibility, accept positional args
 	args := flag.Args()
-	if err := runListener(args, useSharedSecret); err != nil {
+	if len(args) > 0 {
+		port = args[0]
+	}
+	if len(args) > 1 {
+		networkInterface = args[1]
+	}
+
+	if err := runListener(port, networkInterface, useSharedSecret); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func runListener(args []string, useSharedSecret bool) error {
+func runListener(port, networkInterface string, useSharedSecret bool) error {
 	printHeader()
 
-	if len(args) != 2 {
-		return fmt.Errorf("Usage: gotsl [-s|--shared-secret] <port> <network-interface>")
+	// Load configuration with defaults and environment overrides
+	cfg, err := config.LoadServerConfig(port, networkInterface, useSharedSecret)
+	if err != nil {
+		return fmt.Errorf("configuration error: %w", err)
 	}
-
-	port := args[0]
-	networkInterface := args[1]
 
 	log.Println("Generating self-signed certificate...")
 	cert, fingerprint, err := certs.GenerateSelfSignedCert()
@@ -62,7 +75,7 @@ func runListener(args []string, useSharedSecret bool) error {
 	log.Printf("Certificate generated successfully (SHA256: %s)", fingerprint)
 
 	var secret string
-	if useSharedSecret {
+	if cfg.SharedSecretAuth {
 		secret, err = certs.GenerateSecret()
 		if err != nil {
 			return fmt.Errorf("failed to generate shared secret: %w", err)
@@ -70,10 +83,11 @@ func runListener(args []string, useSharedSecret bool) error {
 		log.Printf("✓ Shared secret authentication enabled")
 		log.Printf("Secret (hex): %s", secret)
 		log.Printf("\nTo connect, use:")
-		log.Printf("  gotsr -s %s --cert-fingerprint %s %s:%s <max-retries>\n", secret, fingerprint, networkInterface, port)
+		log.Printf("  gotsr -s %s --cert-fingerprint %s %s:%s <max-retries>\n", secret, fingerprint, cfg.NetworkInterface, cfg.Port)
 	}
 
 	log.Printf("Version: %s (commit %s, date %s)", version.Version, version.Commit, version.Date)
+	log.Printf("Configuration: port=%s, interface=%s", cfg.Port, cfg.NetworkInterface)
 
 	// Create TLS config
 	tlsConfig := &tls.Config{
@@ -81,8 +95,8 @@ func runListener(args []string, useSharedSecret bool) error {
 		MinVersion:   tls.VersionTLS12,
 	}
 
-	// Create listener
-	listener := server.NewListener(port, networkInterface, tlsConfig, secret)
+	// Create listener with configuration
+	listener := server.NewListener(cfg.Port, cfg.NetworkInterface, tlsConfig, secret)
 	netListener, err := listener.Start()
 	if err != nil {
 		return fmt.Errorf("failed to start listener: %w", err)

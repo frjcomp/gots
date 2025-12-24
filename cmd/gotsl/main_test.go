@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/frjcomp/gots/pkg/compression"
+	"github.com/frjcomp/gots/pkg/config"
 )
 
 // TestCompressDecompressRoundTrip verifies that data can be compressed to hex and decompressed back identically
@@ -94,11 +95,20 @@ func TestDecompressCorruptedGzip(t *testing.T) {
 }
 
 func TestRunListenerArgValidation(t *testing.T) {
-	if err := runListener([]string{}, false); err == nil {
-		t.Fatal("expected error for missing args")
+	// Valid call with full args should work (would fail on cert generation, but passes arg validation)
+	// We don't test actual startup since it requires real certificates
+	// Instead test that empty/invalid config is caught
+	
+	// Empty port and network interface should use defaults and validate
+	_, err := config.LoadServerConfig("", "", false)
+	if err != nil {
+		t.Fatalf("LoadServerConfig with defaults failed: %v", err)
 	}
-	if err := runListener([]string{"8443"}, false); err == nil {
-		t.Fatal("expected error for too few args")
+	
+	// Invalid port should be caught
+	_, err = config.LoadServerConfig("not-a-port", "", false)
+	if err == nil {
+		t.Fatal("expected error for invalid port")
 	}
 }
 
