@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"net"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/frjcomp/gots/pkg/compression"
 	"github.com/frjcomp/gots/pkg/config"
+	"github.com/frjcomp/gots/pkg/protocol"
 )
 
 // TestCompressDecompressRoundTrip verifies that data can be compressed to hex and decompressed back identically
@@ -236,5 +238,174 @@ func TestHandleDownloadGlobalGetResponseError(t *testing.T) {
 	result := handleDownloadGlobal(ml, "192.168.1.2:1234", "/remote/file.txt", tmpfile)
 	if result {
 		t.Fatal("expected false when get response fails")
+	}
+}
+
+// Additional tests for better coverage
+func TestHandleUploadGlobalEmptyRemotePath(t *testing.T) {
+	ml := &mockListener{
+		clients: []string{"192.168.1.2:1234"},
+		responses: []string{"OK"},
+	}
+	tmpfile := t.TempDir() + "/test.txt"
+	
+	// Create test file
+	err := os.WriteFile(tmpfile, []byte("test content"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Test with empty remote path - should fail due to empty response
+	result := handleUploadGlobal(ml, "192.168.1.2:1234", tmpfile, "")
+	// Should fail (return false) because mock doesn't provide proper OK response
+	if result {
+		t.Error("expected false for upload without OK response")
+	}
+}
+
+func TestHandleUploadGlobalSendCommandError(t *testing.T) {
+	ml := &mockListener{
+		clients: []string{"192.168.1.2:1234"},
+		sendErr: bytes.ErrTooLarge,
+	}
+	tmpfile := t.TempDir() + "/test.txt"
+	
+	err := os.WriteFile(tmpfile, []byte("test"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	result := handleUploadGlobal(ml, "192.168.1.2:1234", tmpfile, "/remote/path.txt")
+	if result {
+		t.Error("expected false when send command fails")
+	}
+}
+
+func TestHandleUploadGlobalMultipleErrors(t *testing.T) {
+	// Test multiple send errors in sequence
+	ml := &mockListener{
+		clients: []string{"192.168.1.2:1234"},
+		sendErrs: []error{nil, nil, bytes.ErrTooLarge}, // Fail on 3rd send (END_UPLOAD)
+	}
+	tmpfile := t.TempDir() + "/test.txt"
+	
+	err := os.WriteFile(tmpfile, []byte("test"), 0644)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	result := handleUploadGlobal(ml, "192.168.1.2:1234", tmpfile, "/remote/path.txt")
+	if result {
+		t.Error("expected false when END_UPLOAD command fails")
+	}
+}
+
+func TestHandleDownloadGlobalInvalidRemotePath(t *testing.T) {
+	ml := &mockListener{clients: []string{"192.168.1.2:1234"}}
+	tmpfile := t.TempDir() + "/out.txt"
+	
+	// Test with empty remote path
+	result := handleDownloadGlobal(ml, "192.168.1.2:1234", "", tmpfile)
+	// Should continue (true) as path validation doesn't fail the operation
+	if !result {
+		t.Error("expected true for download with empty remote path")
+	}
+}
+
+func TestHandleDownloadGlobalSuccessfulDownload(t *testing.T) {
+	testData := []byte("sample file content for download")
+	compressed, err := compression.CompressToHex(testData)
+	if err != nil {
+		t.Fatalf("Failed to compress test data: %v", err)
+	}
+
+	ml := &mockListener{
+		clients: []string{"192.168.1.2:1234"},
+		responses: []string{protocol.EndOfOutputMarker + protocol.DataPrefix + compressed + protocol.EndOfOutputMarker},
+	}
+	tmpfile := t.TempDir() + "/downloaded.txt"
+
+	result := handleDownloadGlobal(ml, "192.168.1.2:1234", "/remote/file.txt", tmpfile)
+	if !result {
+		t.Error("expected true for successful download")
+	}
+
+	// Verify file was created and contains correct data
+	downloaded, err := os.ReadFile(tmpfile)
+	if err != nil {
+		t.Fatalf("Failed to read downloaded file: %v", err)
+	}
+
+	if !bytes.Equal(downloaded, testData) {
+		t.Errorf("Downloaded content mismatch: got %d bytes, expected %d bytes", len(downloaded), len(testData))
+	}
+}
+
+func TestHandleDownloadGlobalInvalidCompressedData(t *testing.T) {
+	ml := &mockListener{
+		clients: []string{"192.168.1.2:1234"},
+		responses: []string{"invalid-hex-data!!!"},
+	}
+	tmpfile := t.TempDir() + "/out.txt"
+
+	result := handleDownloadGlobal(ml, "192.168.1.2:1234", "/remote/file.txt", tmpfile)
+	// Should continue (true) on decompression error
+	if !result {
+		t.Error("expected true even with invalid compressed data")
+	}
+}
+
+func TestHandleDownloadGlobalSendCommandFails(t *testing.T) {
+	ml := &mockListener{
+		clients: []string{"192.168.1.2:1234"},
+		sendErr: bytes.ErrTooLarge,
+	}
+	tmpfile := t.TempDir() + "/out.txt"
+
+	result := handleDownloadGlobal(ml, "192.168.1.2:1234", "/remote/file.txt", tmpfile)
+	if result {
+		t.Error("expected false when send command fails")
+	}
+}
+
+func TestHandleDownloadGlobalFileWriteError(t *testing.T) {
+	testData := []byte("test content")
+	compressed, err := compression.CompressToHex(testData)
+	if err != nil {
+		t.Fatalf("Failed to compress test data: %v", err)
+	}
+
+	ml := &mockListener{
+		clients: []string{"192.168.1.2:1234"},
+		responses: []string{compressed},
+	}
+
+	// Try to write to invalid path (directory that doesn't exist and can't be created)
+	result := handleDownloadGlobal(ml, "192.168.1.2:1234", "/remote/file.txt", "/nonexistent/dir/file.txt")
+	// Should continue (true) even if write fails
+	if !result {
+		t.Error("expected true even when file write fails")
+	}
+}
+
+func TestListClientsEmptyList(t *testing.T) {
+	ml := &mockListener{clients: []string{}}
+	listClients(ml)
+	// Just verify it doesn't panic
+}
+
+func TestGetClientByIDNotFound(t *testing.T) {
+	ml := &mockListener{clients: []string{"192.168.1.1:1234"}}
+	result := getClientByID(ml, "999")
+	if result != "" {
+		t.Errorf("expected empty string for non-existent client ID, got %s", result)
+	}
+}
+
+func TestGetClientByIDInvalidIndex(t *testing.T) {
+	ml := &mockListener{clients: []string{"192.168.1.1:1234"}}
+	result := getClientByID(ml, "abc")
+	if result != "" {
+		t.Errorf("expected empty string for invalid client ID, got %s", result)
 	}
 }
