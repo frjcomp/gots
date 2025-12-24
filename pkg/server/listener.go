@@ -32,6 +32,7 @@ type Listener struct {
 	clientPtyData     map[string]chan []byte // PTY data channels
 	clientIdentifiers map[string]string      // Short client-provided identifiers
 	forwardManager    *ForwardManager        // Port forwarding manager
+	socksManager      *SocksManager          // SOCKS5 proxy manager
 	mutex             sync.Mutex
 }
 
@@ -50,6 +51,7 @@ func NewListener(port, networkInterface string, tlsConfig *tls.Config, sharedSec
 		clientPtyData:     make(map[string]chan []byte),
 		clientIdentifiers: make(map[string]string),
 		forwardManager:    NewForwardManager(),
+		socksManager:      NewSocksManager(),
 	}
 }
 
@@ -473,4 +475,9 @@ func (l *Listener) GetPtyDataChan(clientAddr string) (chan []byte, bool) {
 // GetForwardManager returns the forward manager
 func (l *Listener) GetForwardManager() *ForwardManager {
 	return l.forwardManager
+}
+
+// GetSocksManager returns the SOCKS manager
+func (l *Listener) GetSocksManager() *SocksManager {
+	return l.socksManager
 }

