@@ -45,9 +45,6 @@ Use this when you need a self-hosted, encrypted reverse shell alternative—for 
   - `-s, --shared-secret SECRET` (optional): Shared secret for authentication
   - `--cert-fingerprint FINGERPRINT` (optional): Server certificate SHA256 fingerprint
 
-- Core gotsl commands: `ls`, `shell <client_id>`, `upload`, `download`, `help`, `exit`.
-- In a shell session: run shell commands; `Ctrl-D` to return, `Ctrl-C` for interrupt.
-
 **Quick tips:**
 First connection without a fingerprint will still work with a self-signed cert; the client (`gotsr`) logs a warning and prints the certificate fingerprint. If you use pinning, obtain and verify the fingerprint via a trusted channel (e.g., printed by `gotsl`) before using `--cert-fingerprint`.
 

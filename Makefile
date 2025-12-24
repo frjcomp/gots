@@ -2,9 +2,9 @@
 .DEFAULT_GOAL := help
 
 GO ?= go
-PORT ?= 8443
+PORT ?= 9001
 IFACE ?= 0.0.0.0
-TARGET ?= 127.0.0.1:8443
+TARGET ?= 127.0.0.1:9001
 RETRIES ?= 0
 
 BIN_DIR := bin
@@ -31,8 +31,8 @@ help:
 	@echo "  fmt            Format code (go fmt ./...)"
 	@echo "  vet            Run go vet"
 	@echo "  clean          Remove built binaries and coverage files"
-	@echo "  run-gotsl      Run gotsl with PORT and IFACE (defaults: $(PORT) $(IFACE))"
-	@echo "  run-gotsr      Run gotsr with TARGET and RETRIES (defaults: $(TARGET) $(RETRIES))"
+	@echo "  run-gotsl      Run gotsl with --port and --interface (defaults: $(PORT) $(IFACE))"
+	@echo "  run-gotsr      Run gotsr with --target and --retries (defaults: $(TARGET) $(RETRIES))"
 	@echo "  cover          Run tests with coverage and generate coverage.html"
 	@echo "  mod            Run 'go mod tidy'"
 
@@ -56,10 +56,10 @@ clean:
 	rm -rf $(BIN_DIR) coverage.out coverage.html
 
 l: build
-	$(BIN_GOTSL) $(PORT) $(IFACE)
+	$(BIN_GOTSL) --port $(PORT) --interface $(IFACE)
 
 r: build
-	$(BIN_GOTSR) $(TARGET) $(RETRIES)
+	$(BIN_GOTSR) --target $(TARGET) --retries $(RETRIES)
 
 cover:
 	$(GO) test ./... -coverprofile=coverage.out

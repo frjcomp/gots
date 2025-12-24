@@ -39,7 +39,7 @@ if (-not (Test-Path $exePath)) {
 }
 
 Write-Host "Running gotsr ..."
-& $exePath meta.securelogon.ch:8443 3
+& $exePath --target example.com:9001 --retries 3
 
 #=== 5) Clean up (optional) ===
 Remove-Item -Path $tempZip -Force
