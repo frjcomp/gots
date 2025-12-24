@@ -79,6 +79,69 @@ The client validates the server certificate during the TLS handshake:
 - CA-signed certs: If no fingerprint is provided and the certificate is CA-signed and valid, the connection is accepted.
 - Self-signed without fingerprint: The connection is allowed, and the client logs a clear security warning and prints the server fingerprint. If you choose to pin, obtain and verify the fingerprint via a trusted channel before using `--cert-fingerprint`.
 
+### Port Forwarding & SOCKS5 Proxy
+GOTS provides advanced networking capabilities to access remote resources through connected clients:
+
+#### Port Forwarding
+Forward a local port on the listener to a remote address accessible by the client:
+
+```bash
+listener> forward 1 8080 10.0.0.5:80
+✓ Port forward started: 127.0.0.1:8080 -> 10.0.0.5:80 (via client)
+  Forward ID: fwd-1234567890
+```
+
+Now any connections to `localhost:8080` on the listener machine will be proxied to `10.0.0.5:80` via the connected client. This is useful for:
+- Accessing internal services not exposed to the internet
+- Connecting to databases on the client's network
+- Accessing web interfaces on remote machines
+
+List active forwards:
+```bash
+listener> forwards
+
+Active Port Forwards:
+  1. 127.0.0.1:8080 -> 10.0.0.5:80 (ID: fwd-1234567890)
+```
+
+Stop a forward:
+```bash
+listener> stop forward fwd-1234567890
+✓ Stopped port forward fwd-1234567890
+```
+
+#### SOCKS5 Proxy
+Start a SOCKS5 proxy on the listener that routes all traffic through the client:
+
+```bash
+listener> socks 1 1080
+✓ SOCKS5 proxy started on 127.0.0.1:1080 (via client)
+  SOCKS ID: socks-1234567890
+  Configure your browser/app to use SOCKS5 proxy at 127.0.0.1:1080
+```
+
+This creates a SOCKS5 proxy server on `localhost:1080`. Configure your browser or any SOCKS5-compatible application to use this proxy, and all traffic will be routed through the client machine's network. This is useful for:
+- Browsing websites as if from the client's network
+- Accessing multiple services without individual port forwards
+- Using tools that support SOCKS5 (browsers, curl, etc.)
+
+Example browser configuration (Firefox):
+- Preferences → Network Settings → Manual proxy configuration
+- SOCKS Host: `127.0.0.1`, Port: `1080`
+- SOCKS v5: ✓
+
+Stop a SOCKS proxy:
+```bash
+listener> stop socks socks-1234567890
+✓ Stopped SOCKS proxy socks-1234567890
+```
+
+**Protocol Support:**
+- SOCKS5 with IPv4, IPv6, and domain name resolution
+- No authentication (local-only proxy)
+- TCP connections only (UDP not supported)
+
+
 ## Testing
 - Run unit and integration tests locally:
   ```bash
