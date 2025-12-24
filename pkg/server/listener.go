@@ -85,7 +85,13 @@ func (l *Listener) acceptConnections(listener net.Listener) {
 // handleClient handles a single client connection
 func (l *Listener) handleClient(conn net.Conn) {
 	clientAddr := conn.RemoteAddr().String()
-	log.Printf("\n[+] New client connected: %s", clientAddr)
+	// Log connection with identifier if known (may be empty at accept time)
+	ident := l.GetClientIdentifier(clientAddr)
+	if ident == "" {
+		log.Printf("\n[+] New client connected: %s [no-id]", clientAddr)
+	} else {
+		log.Printf("\n[+] New client connected: %s [%s]", clientAddr, ident)
+	}
 	defer conn.Close()
 
 	reader := bufio.NewReaderSize(conn, protocol.BufferSize1MB)
@@ -191,6 +197,7 @@ func (l *Listener) handleClient(conn net.Conn) {
 				l.mutex.Lock()
 				l.clientIdentifiers[clientAddr] = id
 				l.mutex.Unlock()
+				log.Printf("[+] Client %s identifier: %s", clientAddr, id)
 				responseBuffer.Reset()
 				continue
 			}
