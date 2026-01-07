@@ -181,20 +181,22 @@ func interactiveShell(l server.ListenerInterface) {
 		case "forwards":
 			listForwards(l)
 		case "socks":
-			if len(parts) < 2 {
-				fmt.Println("Usage: socks <client_id> <local_port>")
-				fmt.Println("Example: socks 1 1080")
-				continue
-			}
-			if len(parts) != 3 {
-				fmt.Println("Usage: socks <client_id> <local_port>")
-				continue
-			}
-			clientAddr := getClientByID(l, parts[1])
-			if clientAddr == "" {
-				continue
-			}
-			handleSocks(l, clientAddr, parts[2])
+				// If no args: list active SOCKS proxies
+				if len(parts) == 1 {
+					listSocks(l)
+					continue
+				}
+				// Expect: socks <client_id> <local_port>
+				if len(parts) != 3 {
+					fmt.Println("Usage: socks <client_id> <local_port>")
+					fmt.Println("Example: socks 1 1080")
+					continue
+				}
+				clientAddr := getClientByID(l, parts[1])
+				if clientAddr == "" {
+					continue
+				}
+				handleSocks(l, clientAddr, parts[2])
 		case "stop":
 			if len(parts) < 2 {
 				fmt.Println("Usage: stop forward <id> | stop socks <id>")
@@ -221,6 +223,7 @@ func printHelp() {
 	fmt.Println("  download <id> <remote> <local> - Download remote file from client")
 	fmt.Println("  forward <id> <local_port> <remote_addr> - Forward local port to remote address through client")
 	fmt.Println("  forwards                    - List active port forwards")
+	fmt.Println("  socks                       - List active SOCKS5 proxies")
 	fmt.Println("  socks <id> <local_port>     - Start SOCKS5 proxy on local port through client")
 	fmt.Println("  stop forward <id>           - Stop a port forward by ID")
 	fmt.Println("  stop socks <id>             - Stop a SOCKS5 proxy by ID")
@@ -623,6 +626,23 @@ func listForwards(l server.ListenerInterface) {
 		}
 	} else {
 		fmt.Println("Error: could not access forward manager")
+	}
+}
+
+func listSocks(l server.ListenerInterface) {
+	if listener, ok := l.(*server.Listener); ok {
+		proxies := listener.GetSocksManager().ListSocks()
+		if len(proxies) == 0 {
+			fmt.Println("No active SOCKS proxies")
+		} else {
+			fmt.Println("\nActive SOCKS Proxies:")
+			for i, p := range proxies {
+				fmt.Printf("  %d. %s (ID: %s)\n", i+1, p.LocalAddr, p.ID)
+			}
+			fmt.Println()
+		}
+	} else {
+		fmt.Println("Error: could not access SOCKS manager")
 	}
 }
 

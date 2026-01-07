@@ -13,7 +13,8 @@ import (
 
 // SocksHandler manages SOCKS5 connections on the client side
 type SocksHandler struct {
-	connections map[string]map[string]net.Conn // socksID -> connID -> connection
+	connections map[string]map[string]net.Conn      // socksID -> connID -> connection
+	stopChans   map[string]map[string]chan struct{} // socksID -> connID -> stop channel
 	mu          sync.RWMutex
 	sendFunc    func(string)
 }
@@ -22,6 +23,7 @@ type SocksHandler struct {
 func NewSocksHandler(sendFunc func(string)) *SocksHandler {
 	return &SocksHandler{
 		connections: make(map[string]map[string]net.Conn),
+		stopChans:   make(map[string]map[string]chan struct{}),
 		sendFunc:    sendFunc,
 	}
 }
@@ -33,6 +35,7 @@ func (sh *SocksHandler) HandleSocksStart(socksID string) error {
 
 	if _, exists := sh.connections[socksID]; !exists {
 		sh.connections[socksID] = make(map[string]net.Conn)
+		sh.stopChans[socksID] = make(map[string]chan struct{})
 		log.Printf("[+] SOCKS proxy %s started", socksID)
 	}
 	return nil
@@ -46,6 +49,7 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 	// Ensure SOCKS proxy exists
 	if _, exists := sh.connections[socksID]; !exists {
 		sh.connections[socksID] = make(map[string]net.Conn)
+		sh.stopChans[socksID] = make(map[string]chan struct{})
 	}
 
 	// Connect to target
@@ -57,23 +61,28 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 	}
 
 	sh.connections[socksID][connID] = conn
+	stopChan := make(chan struct{})
+	sh.stopChans[socksID][connID] = stopChan
 	log.Printf("[+] SOCKS %s conn %s: connected to %s", socksID, connID, targetAddr)
 
 	// Signal server that connection is ready
 	sh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksOk, socksID, connID))
 
 	// Start reading from target and sending back
-	go sh.readFromTarget(socksID, connID, conn)
+	go sh.readFromTarget(socksID, connID, conn, stopChan)
 
 	return nil
 }
 
 // readFromTarget reads data from the target connection and sends it back
-func (sh *SocksHandler) readFromTarget(socksID, connID string, conn net.Conn) {
+func (sh *SocksHandler) readFromTarget(socksID, connID string, conn net.Conn, stopChan chan struct{}) {
 	defer func() {
 		sh.mu.Lock()
 		if conns, exists := sh.connections[socksID]; exists {
 			delete(conns, connID)
+		}
+		if stops, exists := sh.stopChans[socksID]; exists {
+			delete(stops, connID)
 		}
 		sh.mu.Unlock()
 		conn.Close()
@@ -82,6 +91,13 @@ func (sh *SocksHandler) readFromTarget(socksID, connID string, conn net.Conn) {
 
 	buffer := make([]byte, 32768)
 	for {
+		// Check if we should stop reading
+		select {
+		case <-stopChan:
+			return
+		default:
+		}
+
 		n, err := conn.Read(buffer)
 		if err != nil {
 			if err != io.EOF {
@@ -136,6 +152,20 @@ func (sh *SocksHandler) HandleSocksData(socksID, connID, encodedData string) err
 func (sh *SocksHandler) HandleSocksClose(socksID, connID string) {
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
+	
+	// Signal the read goroutine to stop before closing connection
+	if stops, exists := sh.stopChans[socksID]; exists {
+		if stopChan, exists := stops[connID]; exists {
+			select {
+			case <-stopChan:
+				// Already closed
+			default:
+				close(stopChan)
+			}
+			delete(stops, connID)
+		}
+	}
+	
 	sh.closeConnection(socksID, connID)
 }
 
@@ -156,10 +186,30 @@ func (sh *SocksHandler) Close() {
 	defer sh.mu.Unlock()
 
 	for socksID, conns := range sh.connections {
+		for connID := range conns {
+			// Signal read goroutines to stop
+			if stops, exists := sh.stopChans[socksID]; exists {
+				if stopChan, exists := stops[connID]; exists {
+					select {
+					case <-stopChan:
+						// Already closed
+					default:
+						close(stopChan)
+					}
+				}
+			}
+		}
+	}
+
+	for socksID, conns := range sh.connections {
 		for connID, conn := range conns {
 			conn.Close()
 			delete(conns, connID)
 		}
 		delete(sh.connections, socksID)
+	}
+	
+	for socksID := range sh.stopChans {
+		delete(sh.stopChans, socksID)
 	}
 }

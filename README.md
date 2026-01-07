@@ -91,7 +91,11 @@ listener> stop forward fwd-1234567890     # Stop a forward
 **SOCKS5 Proxy** - Start a SOCKS5 proxy on localhost through a client:
 ```bash
 listener> socks 1 1080                    # Start SOCKS5 proxy on localhost:1080
-listener> stop socks socks-1234567890     # Stop a SOCKS5 proxy
+listener> socks # List active SOCKS5 proxies
+Active SOCKS Proxies:
+  1. 127.0.0.1:8443 (ID: socks-1767774545221103600)
+
+listener> stop socks socks-1767774545221103600     # Stop a SOCKS5 proxy
 ```
 Configure your browser/app to use `127.0.0.1:1080` as SOCKS5 proxy.
 

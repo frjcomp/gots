@@ -104,9 +104,11 @@ func TestHandleSocksDataWritesToLocalConn(t *testing.T) {
 	data := []byte("response-from-remote")
 	encoded := base64.StdEncoding.EncodeToString(data)
 
-	if err := sm.HandleSocksData(proxy.ID, connID, encoded); err != nil {
-		t.Fatalf("HandleSocksData error: %v", err)
-	}
+	// Write on server side in a separate goroutine to avoid net.Pipe deadlock
+	done := make(chan error, 1)
+	go func() {
+		done <- sm.HandleSocksData(proxy.ID, connID, encoded)
+	}()
 
 	buf := make([]byte, len(data))
 	n, err := client.Read(buf)
@@ -118,6 +120,9 @@ func TestHandleSocksDataWritesToLocalConn(t *testing.T) {
 	}
 	if string(buf) != string(data) {
 		t.Fatalf("data mismatch: got %q want %q", string(buf), string(data))
+	}
+	if writeErr := <-done; writeErr != nil {
+		t.Fatalf("HandleSocksData error: %v", writeErr)
 	}
 }
 

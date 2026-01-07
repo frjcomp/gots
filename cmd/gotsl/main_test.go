@@ -12,6 +12,8 @@ import (
 	"github.com/frjcomp/gots/pkg/compression"
 	"github.com/frjcomp/gots/pkg/config"
 	"github.com/frjcomp/gots/pkg/protocol"
+    "crypto/tls"
+    "github.com/frjcomp/gots/pkg/server"
 )
 
 // TestCompressDecompressRoundTrip verifies that data can be compressed to hex and decompressed back identically
@@ -441,5 +443,59 @@ func TestGetClientByIDInvalidIndex(t *testing.T) {
 	result := getClientByID(ml, "abc")
 	if result != "" {
 		t.Errorf("expected empty string for invalid client ID, got %s", result)
+	}
+}
+
+func TestListSocksEmpty(t *testing.T) {
+	// Create a concrete listener to access the socks manager
+	l := server.NewListener("0", "127.0.0.1", &tls.Config{}, "")
+
+	// Capture stdout
+	orig := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	listSocks(l)
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = orig
+	buf := new(bytes.Buffer)
+	_, _ = io.Copy(buf, r)
+
+	out := buf.String()
+	if !strings.Contains(out, "No active SOCKS proxies") {
+		t.Fatalf("expected message for no active SOCKS proxies, got: %q", out)
+	}
+}
+
+func TestListSocksWithOneProxy(t *testing.T) {
+	l := server.NewListener("0", "127.0.0.1", &tls.Config{}, "")
+	// Start a socks proxy on an ephemeral port
+	err := l.GetSocksManager().StartSocks("test-socks", "0", func(string) {})
+	if err != nil {
+		t.Fatalf("failed to start socks proxy: %v", err)
+	}
+	defer l.GetSocksManager().StopAll()
+
+	// Capture stdout
+	orig := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+
+	listSocks(l)
+
+	// Restore stdout
+	w.Close()
+	os.Stdout = orig
+	buf := new(bytes.Buffer)
+	_, _ = io.Copy(buf, r)
+
+	out := buf.String()
+	if !strings.Contains(out, "Active SOCKS Proxies:") {
+		t.Fatalf("expected header in output, got: %q", out)
+	}
+	if !strings.Contains(out, "test-socks") {
+		t.Fatalf("expected proxy ID in output, got: %q", out)
 	}
 }
