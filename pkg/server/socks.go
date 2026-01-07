@@ -114,7 +114,6 @@ func (sm *SocksManager) acceptConnections(proxy *SocksProxy) {
 		proxy.mu.Lock()
 		proxy.connCount++
 		connID := fmt.Sprintf("%d", proxy.connCount)
-		proxy.connections[connID] = conn
 		proxy.mu.Unlock()
 
 		log.Printf("[+] SOCKS %s: new connection %s from %s", proxy.ID, connID, conn.RemoteAddr())
@@ -128,9 +127,7 @@ func (sm *SocksManager) acceptConnections(proxy *SocksProxy) {
 func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, conn net.Conn) {
 	defer func() {
 		conn.Close()
-		proxy.mu.Lock()
-		delete(proxy.connections, connID)
-		proxy.mu.Unlock()
+		// Connection cleanup is now handled in relayData
 		proxy.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksClose, proxy.ID, connID))
 	}()
 
@@ -255,12 +252,26 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 		return
 	}
 
+	// Store the connection so HandleSocksData can write responses to it
+	proxy.mu.Lock()
+	proxy.connections[connID] = conn
+	proxy.mu.Unlock()
+
 	// Now relay data bidirectionally
 	sm.relayData(proxy, connID, conn)
 }
 
 // relayData relays data between local connection and remote
 func (sm *SocksManager) relayData(proxy *SocksProxy, connID string, conn net.Conn) {
+	defer func() {
+		// Cleanup connection when relay ends
+		proxy.mu.Lock()
+		delete(proxy.connections, connID)
+		delete(proxy.connReady, connID)
+		proxy.mu.Unlock()
+		log.Printf("[+] SOCKS %s conn %s: relay ended", proxy.ID, connID)
+	}()
+
 	buffer := make([]byte, 32768)
 	for {
 		n, err := conn.Read(buffer)
