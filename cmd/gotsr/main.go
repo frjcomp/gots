@@ -139,26 +139,9 @@ func connectWithRetry(target string, maxRetries int, sharedSecret, certFingerpri
 				backoff = 5 * time.Minute
 			}
 		} else {
-			// Successful command handling: if infinite retries, exit; otherwise attempt one reconnect
+			// Successful command handling: close and exit (do not reconnect)
 			_ = cl.Close()
-			if maxRetries == 0 {
-				return
-			}
-			retries++
-			if retries >= maxRetries {
-				log.Printf("Max retries (%d) reached. Exiting.", maxRetries)
-				return
-			}
-			log.Printf("Reconnecting in %v... (attempt %d)", backoff, retries+1)
-			if sleep != nil {
-				sleep(backoff)
-			} else {
-				time.Sleep(backoff)
-			}
-			backoff *= 2
-			if backoff > 5*time.Minute {
-				backoff = 5 * time.Minute
-			}
+			return
 		}
 	}
 }
