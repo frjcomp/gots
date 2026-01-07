@@ -34,13 +34,18 @@ func (w *windowsPty) Write(p []byte) (int, error) {
 
 func (w *windowsPty) Close() error {
 	if w.readPipe != nil {
+		removePtyWrapper(w.readPipe.Fd())
+	}
+	if w.readPipe != nil {
 		w.readPipe.Close()
 	}
 	if w.writePipe != nil {
 		w.writePipe.Close()
 	}
 	if w.cpty != nil {
-		return w.cpty.Close()
+		err := w.cpty.Close()
+		w.cpty = nil
+		return err
 	}
 	return nil
 }
@@ -148,6 +153,12 @@ func getPtyWrapper(fd uintptr) *windowsPty {
 	ptyWrappersMu.Lock()
 	defer ptyWrappersMu.Unlock()
 	return ptyWrappers[fd]
+}
+
+func removePtyWrapper(fd uintptr) {
+	ptyWrappersMu.Lock()
+	defer ptyWrappersMu.Unlock()
+	delete(ptyWrappers, fd)
 }
 
 // setPtySize sets the PTY window size (Windows ConPTY implementation)
