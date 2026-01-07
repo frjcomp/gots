@@ -138,6 +138,10 @@ func connectWithRetry(target string, maxRetries int, sharedSecret, certFingerpri
 			if backoff > 5*time.Minute {
 				backoff = 5 * time.Minute
 			}
+		} else {
+			// Clean exit after successful command handling; do not reconnect
+			_ = cl.Close()
+			return
 		}
 	}
 }
