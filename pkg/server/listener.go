@@ -249,6 +249,26 @@ func (l *Listener) handleClient(conn net.Conn) {
 				continue
 			}
 
+			// Check for FORWARD_DATA from client (to be written to local conn)
+			if strings.HasPrefix(currentLine, protocol.CmdForwardData+" ") {
+				line := strings.TrimSpace(currentLine)
+				parts := strings.Fields(line)
+				// Expect: FORWARD_DATA <forward_id> <conn_id> <base64_data>
+				if len(parts) >= 4 {
+					forwardID := parts[1]
+					connID := parts[2]
+					// Reconstruct encoded data without relying on Fields join
+					prefix := protocol.CmdForwardData + " " + forwardID + " " + connID + " "
+					encoded := strings.TrimPrefix(line, prefix)
+					// Write decoded data to the local forward connection
+					if err := l.forwardManager.HandleForwardData(forwardID, connID, encoded); err != nil {
+						log.Printf("[-] Forward %s conn %s handle data error: %v", forwardID, connID, err)
+					}
+				}
+				responseBuffer.Reset()
+				continue
+			}
+
 			// Check for PTY data
 			if strings.HasPrefix(currentLine, protocol.CmdPtyData+" ") {
 				encoded := strings.TrimPrefix(currentLine, protocol.CmdPtyData+" ")

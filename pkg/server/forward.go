@@ -13,13 +13,14 @@ import (
 
 // ForwardInfo holds information about a port forward
 type ForwardInfo struct {
-	ID         string
-	LocalAddr  string
-	RemoteAddr string
-	Listener   net.Listener
-	Active     bool
-	ConnCount  int
-	mu         sync.Mutex
+	ID          string
+	LocalAddr   string
+	RemoteAddr  string
+	Listener    net.Listener
+	Active      bool
+	ConnCount   int
+	connections map[string]net.Conn // connID -> local connection (from curl)
+	mu          sync.Mutex
 }
 
 // ForwardManager manages port forwarding sessions
@@ -50,11 +51,12 @@ func (fm *ForwardManager) StartForward(id, localPort, remoteAddr string, sendFun
 	}
 
 	info := &ForwardInfo{
-		ID:         id,
-		LocalAddr:  listener.Addr().String(),
-		RemoteAddr: remoteAddr,
-		Listener:   listener,
-		Active:     true,
+		ID:          id,
+		LocalAddr:   listener.Addr().String(),
+		RemoteAddr:  remoteAddr,
+		Listener:    listener,
+		Active:      true,
+		connections: make(map[string]net.Conn),
 	}
 
 	fm.forwards[id] = info
@@ -87,6 +89,11 @@ func (fm *ForwardManager) acceptConnections(info *ForwardInfo, sendFunc func(str
 
 		log.Printf("[+] Forward %s: new connection %s from %s", info.ID, connID, conn.RemoteAddr())
 
+		// Store the local connection so we can write responses to it
+		info.mu.Lock()
+		info.connections[connID] = conn
+		info.mu.Unlock()
+
 		// Send FORWARD_START to client
 		sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdForwardStart, info.ID, info.RemoteAddr))
 
@@ -97,7 +104,12 @@ func (fm *ForwardManager) acceptConnections(info *ForwardInfo, sendFunc func(str
 
 // forwardConnection handles bidirectional forwarding for a single connection
 func (fm *ForwardManager) forwardConnection(info *ForwardInfo, connID string, conn net.Conn, sendFunc func(string)) {
-	defer conn.Close()
+	defer func() {
+		conn.Close()
+		info.mu.Lock()
+		delete(info.connections, connID)
+		info.mu.Unlock()
+	}()
 
 	// Read from local connection and send to remote
 	buffer := make([]byte, 32768)
@@ -121,10 +133,26 @@ func (fm *ForwardManager) forwardConnection(info *ForwardInfo, connID string, co
 }
 
 // HandleForwardData handles incoming data from the remote side
-func (fm *ForwardManager) HandleForwardData(fwdID, connID, encodedData string, conn net.Conn) error {
+func (fm *ForwardManager) HandleForwardData(fwdID, connID, encodedData string) error {
+	fm.mu.RLock()
+	info, exists := fm.forwards[fwdID]
+	fm.mu.RUnlock()
+
+	if !exists {
+		return fmt.Errorf("forward %s not found", fwdID)
+	}
+
 	data, err := base64.StdEncoding.DecodeString(encodedData)
 	if err != nil {
 		return fmt.Errorf("failed to decode data: %w", err)
+	}
+
+	info.mu.Lock()
+	conn, connExists := info.connections[connID]
+	info.mu.Unlock()
+
+	if !connExists {
+		return fmt.Errorf("connection %s not found", connID)
 	}
 
 	_, err = conn.Write(data)
