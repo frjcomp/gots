@@ -228,24 +228,24 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	// Send connection request to client
 	proxy.sendFunc(fmt.Sprintf("%s %s %s %s\n", protocol.CmdSocksConn, proxy.ID, connID, targetAddr))
 
-	// Send success response (we'll handle actual connection on client side)
-	// Response: [version, status, reserved, addr_type, addr, port]
-	response := []byte{socks5Version, socks5Success, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0}
-	_, err = conn.Write(response)
-	if err != nil {
-		log.Printf("[-] SOCKS %s conn %s: failed to send success response", proxy.ID, connID)
-		proxy.mu.Lock()
-		delete(proxy.connReady, connID)
-		proxy.mu.Unlock()
-		return
-	}
-
 	// Wait for client to establish remote connection (with timeout)
 	select {
 	case <-readyChan:
 		log.Printf("[+] SOCKS %s conn %s: remote connection established", proxy.ID, connID)
 	case <-time.After(5 * time.Second):
 		log.Printf("[-] SOCKS %s conn %s: timeout waiting for remote connection", proxy.ID, connID)
+		// Send failure response to SOCKS client before closing
+		_, _ = conn.Write([]byte{socks5Version, socks5HostUnreachable, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0})
+		proxy.mu.Lock()
+		delete(proxy.connReady, connID)
+		proxy.mu.Unlock()
+		return
+	}
+
+	// Send success response now that remote side is ready
+	// Response: [version, status, reserved, addr_type, addr, port]
+	if _, err := conn.Write([]byte{socks5Version, socks5Success, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0}); err != nil {
+		log.Printf("[-] SOCKS %s conn %s: failed to send success response", proxy.ID, connID)
 		proxy.mu.Lock()
 		delete(proxy.connReady, connID)
 		proxy.mu.Unlock()
