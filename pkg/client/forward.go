@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 
 	"github.com/frjcomp/gots/pkg/protocol"
@@ -28,6 +29,14 @@ func NewForwardHandler(sendFunc func(string)) *ForwardHandler {
 
 // HandleForwardStart handles a FORWARD_START command
 func (fh *ForwardHandler) HandleForwardStart(fwdID, targetAddr string) error {
+	// Validate that targetAddr is in host:port format
+	if !strings.Contains(targetAddr, ":") {
+		err := fmt.Errorf("invalid target address format: %s (expected host:port, e.g., 127.0.0.1:8080)", targetAddr)
+		log.Printf("[-] %v", err)
+		fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
+		return err
+	}
+
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
 

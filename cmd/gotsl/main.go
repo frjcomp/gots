@@ -173,6 +173,13 @@ func interactiveShell(l server.ListenerInterface) {
 				fmt.Println("Usage: forward <client_id> <local_port> <remote_addr>")
 				continue
 			}
+			// Validate remote address format (must be host:port)
+			if !strings.Contains(parts[3], ":") {
+				fmt.Println("Error: remote address must include port (format: host:port)")
+				fmt.Println("Example: forward 1 8080 10.0.0.5:80")
+				fmt.Println("         forward 1 8080 127.0.0.1:8080")
+				continue
+			}
 			clientAddr := getClientByID(l, parts[1])
 			if clientAddr == "" {
 				continue
