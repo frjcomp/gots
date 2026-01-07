@@ -491,14 +491,15 @@ func (rc *ReverseClient) processCommand(command string) (shouldContinue bool, er
 
 // handleForwardStartCommand handles FORWARD_START command
 func (rc *ReverseClient) handleForwardStartCommand(command string) error {
-	// Format: FORWARD_START <fwd_id> <target_addr>
+	// Format: FORWARD_START <fwd_id> <conn_id> <target_addr>
 	parts := strings.Fields(command)
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid FORWARD_START command format")
+	if len(parts) != 4 {
+		return fmt.Errorf("invalid FORWARD_START command format (expected: FORWARD_START <fwd_id> <conn_id> <target_addr>)")
 	}
 	fwdID := parts[1]
-	targetAddr := parts[2]
-	return rc.forwardHandler.HandleForwardStart(fwdID, targetAddr)
+	connID := parts[2]
+	targetAddr := parts[3]
+	return rc.forwardHandler.HandleForwardStart(fwdID, connID, targetAddr)
 }
 
 // handleForwardDataCommand handles FORWARD_DATA command

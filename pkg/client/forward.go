@@ -15,6 +15,7 @@ import (
 // ForwardHandler manages port forwarding on the client side
 type ForwardHandler struct {
 	connections map[string]net.Conn // key: fwdID
+	connIDs     map[string]string    // fwdID -> connID
 	mu          sync.RWMutex
 	sendFunc    func(string)
 }
@@ -23,12 +24,13 @@ type ForwardHandler struct {
 func NewForwardHandler(sendFunc func(string)) *ForwardHandler {
 	return &ForwardHandler{
 		connections: make(map[string]net.Conn),
+		connIDs:     make(map[string]string),
 		sendFunc:    sendFunc,
 	}
 }
 
 // HandleForwardStart handles a FORWARD_START command
-func (fh *ForwardHandler) HandleForwardStart(fwdID, targetAddr string) error {
+func (fh *ForwardHandler) HandleForwardStart(fwdID, connID, targetAddr string) error {
 	// Validate that targetAddr is in host:port format
 	if !strings.Contains(targetAddr, ":") {
 		err := fmt.Errorf("invalid target address format: %s (expected host:port, e.g., 127.0.0.1:8080)", targetAddr)
@@ -55,19 +57,21 @@ func (fh *ForwardHandler) HandleForwardStart(fwdID, targetAddr string) error {
 	}
 
 	fh.connections[fwdID] = conn
+	fh.connIDs[fwdID] = connID
 	log.Printf("[+] Forward %s: connected to %s", fwdID, targetAddr)
 
 	// Start reading from target and sending back
-	go fh.readFromTarget(fwdID, conn)
+	go fh.readFromTarget(fwdID, connID, conn)
 
 	return nil
 }
 
 // readFromTarget reads data from the target connection and sends it back
-func (fh *ForwardHandler) readFromTarget(fwdID string, conn net.Conn) {
+func (fh *ForwardHandler) readFromTarget(fwdID, connID string, conn net.Conn) {
 	defer func() {
 		fh.mu.Lock()
 		delete(fh.connections, fwdID)
+		delete(fh.connIDs, fwdID)
 		fh.mu.Unlock()
 		conn.Close()
 	}()
@@ -85,9 +89,9 @@ func (fh *ForwardHandler) readFromTarget(fwdID string, conn net.Conn) {
 		}
 
 		if n > 0 {
-			// Encode and send data back
+			// Encode and send data back with the correct connID
 			encoded := base64.StdEncoding.EncodeToString(buffer[:n])
-			fh.sendFunc(fmt.Sprintf("%s %s dummy %s\n", protocol.CmdForwardData, fwdID, encoded))
+			fh.sendFunc(fmt.Sprintf("%s %s %s %s\n", protocol.CmdForwardData, fwdID, connID, encoded))
 		}
 	}
 }
@@ -132,6 +136,7 @@ func (fh *ForwardHandler) closeConnection(fwdID string) {
 	if conn, exists := fh.connections[fwdID]; exists {
 		conn.Close()
 		delete(fh.connections, fwdID)
+		delete(fh.connIDs, fwdID)
 		log.Printf("[+] Closed forward %s", fwdID)
 	}
 }
@@ -144,5 +149,6 @@ func (fh *ForwardHandler) Close() {
 	for fwdID, conn := range fh.connections {
 		conn.Close()
 		delete(fh.connections, fwdID)
+		delete(fh.connIDs, fwdID)
 	}
 }

@@ -43,7 +43,7 @@ func TestForwardHandler_HandleForwardStart_InvalidAddress(t *testing.T) {
 	fh := NewForwardHandler(sendFunc)
 	
 	// Try to start with address missing port (just host)
-	err := fh.HandleForwardStart("fwd-1", "127.0.0.1")
+	err := fh.HandleForwardStart("fwd-1", "conn-1", "127.0.0.1")
 	if err == nil {
 		t.Error("Expected error for address without port, got nil")
 	}
@@ -63,7 +63,7 @@ func TestForwardHandler_HandleForwardStart_ValidAddress(t *testing.T) {
 	fh := NewForwardHandler(sendFunc)
 	
 	// Valid format (connection will fail but address format is valid)
-	err := fh.HandleForwardStart("fwd-1", "127.0.0.1:99999")
+	err := fh.HandleForwardStart("fwd-1", "conn-1", "127.0.0.1:99999")
 	// Error is expected because port 99999 isn't listening, but it's a connection error, not format error
 	if err != nil && err.Error() != "invalid target address format: 127.0.0.1:99999 (expected host:port, e.g., 127.0.0.1:8080)" {
 		// This is expected - connection error is fine

@@ -94,8 +94,8 @@ func (fm *ForwardManager) acceptConnections(info *ForwardInfo, sendFunc func(str
 		info.connections[connID] = conn
 		info.mu.Unlock()
 
-		// Send FORWARD_START to client
-		sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdForwardStart, info.ID, info.RemoteAddr))
+		// Send FORWARD_START to client with connID
+		sendFunc(fmt.Sprintf("%s %s %s %s\n", protocol.CmdForwardStart, info.ID, connID, info.RemoteAddr))
 
 		// Start forwarding data
 		go fm.forwardConnection(info, connID, conn, sendFunc)
