@@ -70,9 +70,9 @@ func TestSocksHandler_Close(t *testing.T) {
 // TestSocksHandler_RaceConditionOnClose verifies that closing a connection
 // while readFromTarget is running doesn't cause "use of closed network connection" errors
 func TestSocksHandler_RaceConditionOnClose(t *testing.T) {
-	sendMessages := []string{}
+	messageChan := make(chan string, 10)
 	sendFunc := func(msg string) {
-		sendMessages = append(sendMessages, msg)
+		messageChan <- msg
 	}
 	sh := NewSocksHandler(sendFunc)
 	
@@ -117,9 +117,9 @@ func TestSocksHandler_RaceConditionOnClose(t *testing.T) {
 // TestSocksHandler_CloseSignalsReadGoroutine verifies that stop channels
 // properly signal read goroutines to exit
 func TestSocksHandler_CloseSignalsReadGoroutine(t *testing.T) {
-	sendMessages := []string{}
+	messageChan := make(chan string, 10)
 	sendFunc := func(msg string) {
-		sendMessages = append(sendMessages, msg)
+		messageChan <- msg
 	}
 	sh := NewSocksHandler(sendFunc)
 	
@@ -164,9 +164,9 @@ func TestSocksHandler_CloseSignalsReadGoroutine(t *testing.T) {
 
 // TestSocksHandler_HandleSocksConnThenClose verifies the full connection lifecycle
 func TestSocksHandler_HandleSocksConnThenClose(t *testing.T) {
-	sendMessages := []string{}
+	messageChan := make(chan string, 10)
 	sendFunc := func(msg string) {
-		sendMessages = append(sendMessages, msg)
+		messageChan <- msg
 	}
 	sh := NewSocksHandler(sendFunc)
 	
@@ -225,6 +225,9 @@ func TestSocksHandler_HandleSocksConnThenClose(t *testing.T) {
 	// Wait for listener goroutine to finish
 	<-connDone
 	
+	// Allow read goroutine and its defer to complete
+	time.Sleep(50 * time.Millisecond)
+	
 	// Verify connection is cleaned up
 	sh.mu.RLock()
 	conns, _ = sh.connections["test-socks"]
@@ -234,12 +237,19 @@ func TestSocksHandler_HandleSocksConnThenClose(t *testing.T) {
 		t.Errorf("Expected 0 connections after close, got %d", len(conns))
 	}
 	
-	// Verify SOCKS_OK was sent
-	var foundOk bool
-	for _, msg := range sendMessages {
-		if strings.Contains(msg, "SOCKS_OK") {
-			foundOk = true
-			break
+	// Verify SOCKS_OK was sent - drain the message channel
+	foundOk := false
+	timeout := time.After(100 * time.Millisecond)
+drainLoop:
+	for {
+		select {
+		case msg := <-messageChan:
+			if strings.Contains(msg, "SOCKS_OK") {
+				foundOk = true
+				break drainLoop
+			}
+		case <-timeout:
+			break drainLoop
 		}
 	}
 	if !foundOk {

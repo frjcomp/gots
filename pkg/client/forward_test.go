@@ -80,9 +80,9 @@ func TestForwardHandler_HandleForwardStart_ValidAddress(t *testing.T) {
 // TestForwardHandler_ReadFromTargetSendsCorrectConnID verifies that
 // the read goroutine sends response data with the correct connID
 func TestForwardHandler_ReadFromTargetSendsCorrectConnID(t *testing.T) {
-	sentMessages := []string{}
+	messageChan := make(chan string, 10)
 	sendFunc := func(msg string) {
-		sentMessages = append(sentMessages, msg)
+		messageChan <- msg
 	}
 	fh := NewForwardHandler(sendFunc)
 	
@@ -97,20 +97,14 @@ func TestForwardHandler_ReadFromTargetSendsCorrectConnID(t *testing.T) {
 	client.Write([]byte(testData))
 	client.Close()
 	
-	// Allow read goroutine to process
-	time.Sleep(50 * time.Millisecond)
-	
-	// Verify FORWARD_DATA message was sent with correct connID
-	foundData := false
-	for _, msg := range sentMessages {
-		if strings.HasPrefix(msg, "FORWARD_DATA fwd-test conn-42") {
-			foundData = true
-			break
+	// Wait for message with timeout
+	select {
+	case msg := <-messageChan:
+		if !strings.HasPrefix(msg, "FORWARD_DATA fwd-test conn-42") {
+			t.Errorf("Expected FORWARD_DATA message with conn-42 connID, got: %s", msg)
 		}
-	}
-	
-	if !foundData {
-		t.Errorf("Expected FORWARD_DATA message with conn-42 connID, got: %v", sentMessages)
+	case <-time.After(100 * time.Millisecond):
+		t.Error("Timeout waiting for FORWARD_DATA message")
 	}
 }
 
