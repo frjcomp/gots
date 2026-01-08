@@ -129,6 +129,12 @@ func runListener(port, networkInterface string, useSharedSecret bool) error {
 }
 
 func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) {
+	// Check if stdin is a TTY; if not, use basic shell for compatibility with tests
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		interactiveShellBasic(l)
+		return
+	}
+	
 	// Create completer for tab completion
 	completer := &shellCompleter{listener: l}
 	

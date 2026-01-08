@@ -39,7 +39,7 @@ func TestPtyComprehensive(t *testing.T) {
 	waitForContains(t, listener, "PTY shell active", 5*time.Second)
 	send(listener, "\x04") // Ctrl-D
 	waitForContains(t, listener, "[Remote shell exited]", 5*time.Second)
-	waitForContains(t, listener, "listener>", 5*time.Second)
+	waitForContains(t, listener, "gotsl>", 5*time.Second)
 	t.Log("✓ PTY entry/exit with Ctrl-D works")
 
 	t.Log("=== Test 2: Listener responsive after PTY exit ===")
@@ -52,7 +52,7 @@ func TestPtyComprehensive(t *testing.T) {
 	waitForContains(t, listener, "PTY shell active", 5*time.Second)
 	send(listener, "exit\n")
 	waitForContains(t, listener, "[Remote shell exited]", 5*time.Second)
-	waitForContains(t, listener, "listener>", 5*time.Second)
+	waitForContains(t, listener, "gotsl>", 5*time.Second)
 	t.Log("✓ Exit command in PTY works")
 
 	t.Log("=== Test 4: Listener responsive after exit command ===")
@@ -83,7 +83,7 @@ func TestPtyComprehensive(t *testing.T) {
 	t.Log("=== Test 7: Exit via Ctrl-D from command execution ===")
 	send(listener, "\x04") // Ctrl-D
 	waitForContains(t, listener, "[Remote shell exited]", 5*time.Second)
-	waitForContains(t, listener, "listener>", 5*time.Second)
+	waitForContains(t, listener, "gotsl>", 5*time.Second)
 	t.Log("✓ Ctrl-D exits PTY cleanly")
 
 	t.Log("=== Test 8: Final listener responsiveness ===")
