@@ -1,12 +1,15 @@
 package client
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/frjcomp/gots/pkg/protocol"
 )
@@ -17,6 +20,14 @@ type SocksHandler struct {
 	stopChans   map[string]map[string]chan struct{} // socksID -> connID -> stop channel
 	mu          sync.RWMutex
 	sendFunc    func(string)
+}
+
+// defaultResolver allows tests to swap DNS resolution.
+var defaultResolver resolver = net.DefaultResolver
+
+type resolver interface {
+	LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+	LookupAddr(ctx context.Context, addr string) ([]string, error)
 }
 
 // NewSocksHandler creates a new SOCKS handler
@@ -52,8 +63,7 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 		sh.stopChans[socksID] = make(map[string]chan struct{})
 	}
 
-	// Connect to target
-	conn, err := net.Dial("tcp", targetAddr)
+	conn, dialAddr, err := sh.dialWithIPv4Preference(targetAddr)
 	if err != nil {
 		log.Printf("[-] SOCKS %s conn %s: failed to connect to %s: %v", socksID, connID, targetAddr, err)
 		sh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksClose, socksID, connID))
@@ -63,7 +73,7 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 	sh.connections[socksID][connID] = conn
 	stopChan := make(chan struct{})
 	sh.stopChans[socksID][connID] = stopChan
-	log.Printf("[+] SOCKS %s conn %s: connected to %s", socksID, connID, targetAddr)
+	log.Printf("[+] SOCKS %s conn %s: connected to %s (dial=%s)", socksID, connID, targetAddr, dialAddr)
 
 	// Signal server that connection is ready
 	sh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksOk, socksID, connID))
@@ -72,6 +82,90 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 	go sh.readFromTarget(socksID, connID, conn, stopChan)
 
 	return nil
+}
+
+// dialWithIPv4Preference tries to reach targetAddr, preferring IPv4 if available.
+// It returns the established connection and the concrete dial address used.
+func (sh *SocksHandler) dialWithIPv4Preference(targetAddr string) (net.Conn, string, error) {
+	host, port, err := net.SplitHostPort(targetAddr)
+	if err != nil {
+		return nil, "", err
+	}
+	host = strings.Trim(host, "[]")
+
+	for _, addr := range resolveDialAddresses(host, port) {
+		conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
+		if err == nil {
+			return conn, addr, nil
+		}
+	}
+
+	return nil, "", fmt.Errorf("all dial attempts failed for %s", targetAddr)
+}
+
+// resolveDialAddresses returns dial addresses with IPv4 candidates first when available.
+func resolveDialAddresses(host, port string) []string {
+	ip := net.ParseIP(host)
+	if ip != nil {
+		// If IPv6 literal, try IPv4 fallback via reverse DNS, then original
+		if ip.To4() == nil {
+			if v4 := ipv4FallbackFromReverse(host); v4 != "" {
+				return []string{net.JoinHostPort(v4, port), net.JoinHostPort(host, port)}
+			}
+			return []string{net.JoinHostPort(host, port)}
+		}
+		// IPv4 literal
+		return []string{net.JoinHostPort(ip.String(), port)}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	ips, err := defaultResolver.LookupIPAddr(ctx, host)
+	if err != nil || len(ips) == 0 {
+		return []string{net.JoinHostPort(host, port)}
+	}
+
+	addrs := make([]string, 0, len(ips))
+	for _, ipAddr := range ips {
+		if v4 := ipAddr.IP.To4(); v4 != nil {
+			addrs = append(addrs, net.JoinHostPort(v4.String(), port))
+		}
+	}
+	for _, ipAddr := range ips {
+		if ipAddr.IP.To4() == nil {
+			addrs = append(addrs, net.JoinHostPort(ipAddr.IP.String(), port))
+		}
+	}
+
+	if len(addrs) == 0 {
+		return []string{net.JoinHostPort(host, port)}
+	}
+	return addrs
+}
+
+// ipv4FallbackFromReverse attempts reverse DNS on an IPv6 literal to find an IPv4 address.
+func ipv4FallbackFromReverse(host string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	names, err := defaultResolver.LookupAddr(ctx, host)
+	if err != nil || len(names) == 0 {
+		return ""
+	}
+
+	name := strings.TrimSuffix(names[0], ".")
+	ips, err := defaultResolver.LookupIPAddr(ctx, name)
+	if err != nil {
+		return ""
+	}
+
+	for _, ipAddr := range ips {
+		if v4 := ipAddr.IP.To4(); v4 != nil {
+			return v4.String()
+		}
+	}
+	return ""
 }
 
 // readFromTarget reads data from the target connection and sends it back
@@ -152,7 +246,7 @@ func (sh *SocksHandler) HandleSocksData(socksID, connID, encodedData string) err
 func (sh *SocksHandler) HandleSocksClose(socksID, connID string) {
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
-	
+
 	// Signal the read goroutine to stop before closing connection
 	if stops, exists := sh.stopChans[socksID]; exists {
 		if stopChan, exists := stops[connID]; exists {
@@ -165,7 +259,7 @@ func (sh *SocksHandler) HandleSocksClose(socksID, connID string) {
 			delete(stops, connID)
 		}
 	}
-	
+
 	sh.closeConnection(socksID, connID)
 }
 
@@ -208,7 +302,7 @@ func (sh *SocksHandler) Close() {
 		}
 		delete(sh.connections, socksID)
 	}
-	
+
 	for socksID := range sh.stopChans {
 		delete(sh.stopChans, socksID)
 	}
