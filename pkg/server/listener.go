@@ -31,9 +31,19 @@ type Listener struct {
 	clientPtyMode     map[string]bool        // Track if client is in PTY mode
 	clientPtyData     map[string]chan []byte // PTY data channels
 	clientIdentifiers map[string]string      // Short client-provided identifiers
-	forwardManager    *ForwardManager        // Port forwarding manager
-	socksManager      *SocksManager          // SOCKS5 proxy manager
+	clientMetadata    map[string]ClientMetadata
+	forwardManager    *ForwardManager // Port forwarding manager
+	socksManager      *SocksManager   // SOCKS5 proxy manager
 	mutex             sync.Mutex
+}
+
+// ClientMetadata captures optional metadata sent by the client during IDENT.
+// Fields may be empty when the client does not provide the data.
+type ClientMetadata struct {
+	Identifier string
+	OS         string
+	Hostname   string
+	IP         string
 }
 
 // NewListener creates a new reverse shell listener with the given port,
@@ -50,6 +60,7 @@ func NewListener(port, networkInterface string, tlsConfig *tls.Config, sharedSec
 		clientPtyMode:     make(map[string]bool),
 		clientPtyData:     make(map[string]chan []byte),
 		clientIdentifiers: make(map[string]string),
+		clientMetadata:    make(map[string]ClientMetadata),
 		forwardManager:    NewForwardManager(),
 		socksManager:      NewSocksManager(),
 	}
@@ -147,17 +158,18 @@ func (l *Listener) handleClient(conn net.Conn) {
 		delete(l.clientResponses, clientAddr)
 		delete(l.clientPausePing, clientAddr)
 		delete(l.clientIdentifiers, clientAddr)
+		delete(l.clientMetadata, clientAddr)
 		if ptyDataChan, exists := l.clientPtyData[clientAddr]; exists {
 			close(ptyDataChan)
 			delete(l.clientPtyData, clientAddr)
 		}
 		delete(l.clientPtyMode, clientAddr)
 		l.mutex.Unlock()
-		
+
 		// Clean up forwards and SOCKS proxies for this client
 		// Note: This is best-effort cleanup - IDs are tied to commands, not clients
 		// For production, you'd track client->forward/socks mappings
-		
+
 		close(cmdChan)
 		close(respChan)
 		log.Printf("[-] Client disconnected: %s", clientAddr)
@@ -195,12 +207,12 @@ func (l *Listener) handleClient(conn net.Conn) {
 			// Check for client identifier announcement
 			currentLine := responseBuffer.String()
 			if strings.HasPrefix(currentLine, protocol.CmdIdent+" ") {
-				id := strings.TrimSpace(strings.TrimPrefix(currentLine, protocol.CmdIdent+" "))
-				id = strings.TrimSuffix(id, "\n")
+				meta := parseIdentMetadata(currentLine)
 				l.mutex.Lock()
-				l.clientIdentifiers[clientAddr] = id
+				l.clientIdentifiers[clientAddr] = meta.Identifier
+				l.clientMetadata[clientAddr] = meta
 				l.mutex.Unlock()
-				log.Printf("[+] Client %s identifier: %s", clientAddr, id)
+				log.Printf("[+] Client %s identifier: %s", clientAddr, meta.Identifier)
 				responseBuffer.Reset()
 				continue
 			}
@@ -352,6 +364,54 @@ func (l *Listener) handleClient(conn net.Conn) {
 	}
 }
 
+func parseIdentMetadata(line string) ClientMetadata {
+	meta := ClientMetadata{}
+	if line == "" {
+		return meta
+	}
+
+	trimmed := strings.TrimSpace(strings.TrimPrefix(line, protocol.CmdIdent))
+	if trimmed == "" {
+		return meta
+	}
+
+	parts := strings.Fields(trimmed)
+	if len(parts) == 0 {
+		return meta
+	}
+
+	ident := strings.TrimSpace(parts[0])
+	if ident == "" {
+		return meta
+	}
+	meta.Identifier = ident
+
+	for _, part := range parts[1:] {
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		key := strings.TrimSpace(kv[0])
+		val := strings.TrimSpace(kv[1])
+		if key == "" || val == "" {
+			continue
+		}
+		switch key {
+		case "os":
+			meta.OS = val
+		case "host":
+			meta.Hostname = val
+		case "ip":
+			meta.IP = val
+		}
+	}
+
+	return meta
+}
+
 // GetClients returns a list of currently connected client addresses.
 func (l *Listener) GetClients() []string {
 	l.mutex.Lock()
@@ -369,6 +429,14 @@ func (l *Listener) GetClientIdentifier(clientAddr string) string {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	return l.clientIdentifiers[clientAddr]
+}
+
+// GetClientMetadata returns metadata provided by the client (if any).
+func (l *Listener) GetClientMetadata(clientAddr string) (ClientMetadata, bool) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	meta, ok := l.clientMetadata[clientAddr]
+	return meta, ok
 }
 
 // SendCommand sends a command to a specific client identified by its address.

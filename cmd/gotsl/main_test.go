@@ -161,6 +161,7 @@ type mockListener struct {
 	sendErrs     []error // Multiple send errors for different calls
 	getErr       error
 	identifiers  map[string]string
+	metadata     map[string]server.ClientMetadata
 }
 
 func (m *mockListener) GetClients() []string {
@@ -225,13 +226,27 @@ func (m *mockListener) GetClientIdentifier(clientAddr string) string {
 	return m.identifiers[clientAddr]
 }
 
+func (m *mockListener) GetClientMetadata(clientAddr string) (server.ClientMetadata, bool) {
+	if m.metadata == nil {
+		return server.ClientMetadata{}, false
+	}
+	meta, ok := m.metadata[clientAddr]
+	return meta, ok
+}
+
 func TestListClientsIncludesIdentifiers(t *testing.T) {
 	// Capture stdout
 	orig := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	ml := &mockListener{clients: []string{"1.2.3.4:1111", "5.6.7.8:2222"}, identifiers: map[string]string{"1.2.3.4:1111": "abc12345"}}
+	ml := &mockListener{
+		clients:     []string{"1.2.3.4:1111", "5.6.7.8:2222"},
+		identifiers: map[string]string{"1.2.3.4:1111": "abc12345"},
+		metadata: map[string]server.ClientMetadata{
+			"1.2.3.4:1111": {Identifier: "abc12345", OS: "linux", Hostname: "host1", IP: "10.0.0.2"},
+		},
+	}
 	listClients(ml)
 
 	// Restore stdout
@@ -241,8 +256,8 @@ func TestListClientsIncludesIdentifiers(t *testing.T) {
 	_, _ = io.Copy(buf, r)
 
 	out := buf.String()
-	if !strings.Contains(out, "1.2.3.4:1111 [abc12345]") {
-		t.Fatalf("expected identifier in list output, got: %s", out)
+	if !strings.Contains(out, "1.2.3.4:1111 [abc12345] (os=linux, host=host1, ip=10.0.0.2)") {
+		t.Fatalf("expected identifier and metadata in list output, got: %s", out)
 	}
 	if !strings.Contains(out, "5.6.7.8:2222 [no-id]") {
 		t.Fatalf("expected [no-id] for missing identifier, got: %s", out)

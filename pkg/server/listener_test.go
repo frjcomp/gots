@@ -528,3 +528,33 @@ func TestHandleClientAuthenticationSuccess(t *testing.T) {
 
 	t.Log("✓ Authentication success path verified")
 }
+
+func TestParseIdentMetadata(t *testing.T) {
+	line := "IDENT abcd1234 os=linux host=demo ip=10.0.0.5"
+	meta := parseIdentMetadata(line)
+
+	if meta.Identifier != "abcd1234" {
+		t.Fatalf("expected identifier abcd1234, got %s", meta.Identifier)
+	}
+	if meta.OS != "linux" {
+		t.Fatalf("expected os linux, got %s", meta.OS)
+	}
+	if meta.Hostname != "demo" {
+		t.Fatalf("expected hostname demo, got %s", meta.Hostname)
+	}
+	if meta.IP != "10.0.0.5" {
+		t.Fatalf("expected ip 10.0.0.5, got %s", meta.IP)
+	}
+}
+
+func TestParseIdentMetadataMissingFields(t *testing.T) {
+	line := "IDENT efgh5678"
+	meta := parseIdentMetadata(line)
+
+	if meta.Identifier != "efgh5678" {
+		t.Fatalf("expected identifier efgh5678, got %s", meta.Identifier)
+	}
+	if meta.OS != "" || meta.Hostname != "" || meta.IP != "" {
+		t.Fatalf("expected empty metadata fields, got %+v", meta)
+	}
+}

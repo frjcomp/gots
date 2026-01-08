@@ -250,11 +250,26 @@ func listClients(l server.ListenerInterface) {
 		fmt.Println("\nConnected Clients:")
 		for i, addr := range clients {
 			ident := l.GetClientIdentifier(addr)
+			meta, _ := l.GetClientMetadata(addr)
 			suffix := " [no-id]"
 			if ident != "" {
 				suffix = " [" + ident + "]"
 			}
-			fmt.Printf("  %d. %s%s\n", i+1, addr, suffix)
+			metaParts := make([]string, 0, 3)
+			if meta.OS != "" {
+				metaParts = append(metaParts, "os="+meta.OS)
+			}
+			if meta.Hostname != "" {
+				metaParts = append(metaParts, "host="+meta.Hostname)
+			}
+			if meta.IP != "" {
+				metaParts = append(metaParts, "ip="+meta.IP)
+			}
+			metaSuffix := ""
+			if len(metaParts) > 0 {
+				metaSuffix = " (" + strings.Join(metaParts, ", ") + ")"
+			}
+			fmt.Printf("  %d. %s%s%s\n", i+1, addr, suffix, metaSuffix)
 		}
 		fmt.Println()
 	}

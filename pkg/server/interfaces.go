@@ -30,6 +30,9 @@ type ListenerInterface interface {
 	// Returns empty string when no identifier was announced.
 	GetClientIdentifier(clientAddr string) string
 
+	// GetClientMetadata returns metadata sent during IDENT, if available.
+	GetClientMetadata(clientAddr string) (ClientMetadata, bool)
+
 	// EnterPtyMode enters interactive PTY mode with a specific client.
 	// Returns a channel that receives PTY data, or an error if mode entry fails.
 	EnterPtyMode(clientAddr string) (chan []byte, error)
