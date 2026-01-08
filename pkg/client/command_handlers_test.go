@@ -1039,17 +1039,17 @@ func TestHandlePtyDataCommandEmptyData(t *testing.T) {
 
 // TestHandlePtyDataCommandMultipleCtrlD tests Ctrl-D handling across all platforms
 func TestHandlePtyDataCommandMultipleCtrlD(t *testing.T) {
-	// Create a buffer to capture writes (works across all platforms)
-	bufFile, err := os.CreateTemp("", "pty-test-buf-*")
+	// Use a pipe so writes are immediately readable and ordering is deterministic
+	readPipe, writePipe, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
+		t.Fatalf("Failed to create pipe: %v", err)
 	}
-	defer os.Remove(bufFile.Name())
-	defer bufFile.Close()
+	defer readPipe.Close()
+	defer writePipe.Close()
 
 	client, _ := createMockClient()
 	client.inPtyMode = true
-	client.ptyFile = bufFile
+	client.ptyFile = writePipe
 
 	// Test data with multiple Ctrl-D bytes
 	testData := []byte("test\x04more\x04data")
@@ -1066,12 +1066,11 @@ func TestHandlePtyDataCommandMultipleCtrlD(t *testing.T) {
 		t.Fatalf("handlePtyDataCommand failed: %v", err)
 	}
 
-	// Flush to ensure data is written
-	bufFile.Sync()
-	bufFile.Seek(0, 0)
-	written, err := io.ReadAll(bufFile)
+	// Close writer to signal EOF and capture what was written
+	writePipe.Close()
+	written, err := io.ReadAll(readPipe)
 	if err != nil {
-		t.Fatalf("Failed to read from buffer: %v", err)
+		t.Fatalf("Failed to read from pipe: %v", err)
 	}
 
 	var expectedData []byte
