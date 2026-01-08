@@ -1037,23 +1037,19 @@ func TestHandlePtyDataCommandEmptyData(t *testing.T) {
 	t.Logf("✓ Empty PTY data handling test passed")
 }
 
-// TestHandlePtyDataCommandMultipleCtrlD tests only first Ctrl-D is replaced
+// TestHandlePtyDataCommandMultipleCtrlD tests Ctrl-D handling across all platforms
 func TestHandlePtyDataCommandMultipleCtrlD(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Ctrl-D translation only applies on Windows")
-	}
-
-	client, _ := createMockClient()
-	client.inPtyMode = true
-
-	tmpFile, err := os.CreateTemp("", "pty-test-*")
+	// Create a buffer to capture writes (works across all platforms)
+	bufFile, err := os.CreateTemp("", "pty-test-buf-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
-	defer os.Remove(tmpFile.Name())
-	defer tmpFile.Close()
+	defer os.Remove(bufFile.Name())
+	defer bufFile.Close()
 
-	client.ptyFile = tmpFile
+	client, _ := createMockClient()
+	client.inPtyMode = true
+	client.ptyFile = bufFile
 
 	// Test data with multiple Ctrl-D bytes
 	testData := []byte("test\x04more\x04data")
@@ -1070,19 +1066,29 @@ func TestHandlePtyDataCommandMultipleCtrlD(t *testing.T) {
 		t.Fatalf("handlePtyDataCommand failed: %v", err)
 	}
 
-	tmpFile.Seek(0, 0)
-	written, err := io.ReadAll(tmpFile)
+	// Flush to ensure data is written
+	bufFile.Sync()
+	bufFile.Seek(0, 0)
+	written, err := io.ReadAll(bufFile)
 	if err != nil {
-		t.Fatalf("Failed to read from temp file: %v", err)
+		t.Fatalf("Failed to read from buffer: %v", err)
 	}
 
-	// Only first Ctrl-D should be replaced
-	expectedData := []byte("testexit\r\nmore\x04data")
+	var expectedData []byte
+	switch runtime.GOOS {
+	case "windows":
+		// On Windows, only first Ctrl-D should be replaced with 'exit\r\n'
+		expectedData = []byte("testexit\r\nmore\x04data")
+	default:
+		// On Unix-like systems, Ctrl-D is passed through unchanged
+		expectedData = []byte("test\x04more\x04data")
+	}
+
 	if !bytes.Equal(written, expectedData) {
-		t.Errorf("Multiple Ctrl-D handling failed.\nExpected: %q\nGot: %q", expectedData, written)
+		t.Errorf("Multiple Ctrl-D handling failed on %s.\nExpected: %q\nGot: %q", runtime.GOOS, expectedData, written)
 	}
 
-	t.Logf("✓ Multiple Ctrl-D test passed on Windows")
+	t.Logf("✓ Multiple Ctrl-D test passed on %s", runtime.GOOS)
 }
 
 // TestHandlePtyResizeCommand tests PTY window resize command
