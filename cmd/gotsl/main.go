@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/chzyer/readline"
 	"github.com/frjcomp/gots/pkg/certs"
 	"github.com/frjcomp/gots/pkg/compression"
 	"github.com/frjcomp/gots/pkg/config"
@@ -117,20 +119,44 @@ func runListener(port, networkInterface string, useSharedSecret bool) error {
 	defer netListener.Close()
 
 	log.Println("Listener ready. Waiting for connections...")
-	interactiveShell(listener)
+	
+	// Redirect subsequent logs to avoid interfering with readline
+	logRedirector := newLogRedirector()
+	log.SetOutput(logRedirector)
+	
+	interactiveShell(listener, logRedirector)
 	return nil
 }
 
-func interactiveShell(l server.ListenerInterface) {
-	reader := bufio.NewReader(os.Stdin)
+func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) {
+	// Create completer for tab completion
+	completer := &shellCompleter{listener: l}
+	
+	rl, err := readline.NewEx(&readline.Config{
+		Prompt:          "\033[32mgotsl>\033[0m ",
+		HistoryFile:     "/tmp/.gotsl_history",
+		AutoComplete:    completer,
+		InterruptPrompt: "^C",
+		EOFPrompt:       "exit",
+	})
+	if err != nil {
+		log.Printf("Warning: readline initialization failed, using basic input: %v", err)
+		interactiveShellBasic(l)
+		return
+	}
+	defer rl.Close()
+	
+	// Set readline instance for log redirector
+	logRedirector.setReadline(rl)
 
 	printHelp()
 
 	for {
-		fmt.Print("listener> ")
-		line, err := reader.ReadString('\n')
+		line, err := rl.Readline()
 		if err != nil {
-			// Treat EOF (Ctrl-D) as exit; other errors just return
+			if err == readline.ErrInterrupt || err == io.EOF {
+				return
+			}
 			return
 		}
 
@@ -208,6 +234,118 @@ func interactiveShell(l server.ListenerInterface) {
 				continue
 			}
 			// Expect: socks <client_id> <local_port>
+			if len(parts) != 3 {
+				fmt.Println("Usage: socks <client_id> <local_port>")
+				fmt.Println("Example: socks 1 1080")
+				continue
+			}
+			clientAddr := getClientByID(l, parts[1])
+			if clientAddr == "" {
+				continue
+			}
+			handleSocks(l, clientAddr, parts[2])
+		case "stop":
+			if len(parts) < 2 {
+				fmt.Println("Usage: stop forward <id> | stop socks <id>")
+				continue
+			}
+			if len(parts) != 3 {
+				fmt.Println("Usage: stop forward <id> | stop socks <id>")
+				continue
+			}
+			handleStop(l, parts[1], parts[2])
+		case "exit":
+			return
+		default:
+			fmt.Printf("Unknown command: %s (type 'help' or see available commands above)\n", command)
+		}
+	}
+}
+
+// interactiveShellBasic is a fallback when readline is not available
+func interactiveShellBasic(l server.ListenerInterface) {
+	reader := bufio.NewReader(os.Stdin)
+
+	printHelp()
+
+	for {
+		fmt.Print("gotsl> ")
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return
+		}
+
+		input := strings.TrimSpace(line)
+		if input == "" {
+			continue
+		}
+
+		parts := strings.Fields(input)
+		command := parts[0]
+
+		switch command {
+		case "ls", "dir":
+			listClients(l)
+		case "help":
+			printHelp()
+		case "shell":
+			if len(parts) < 2 {
+				fmt.Println("Usage: shell <client_id>")
+				continue
+			}
+			clientAddr := getClientByID(l, parts[1])
+			if clientAddr == "" {
+				continue
+			}
+			enterPtyShell(l, clientAddr)
+		case "upload":
+			if len(parts) != 4 {
+				fmt.Println("Usage: upload <client_id> <local_path> <remote_path>")
+				continue
+			}
+			clientAddr := getClientByID(l, parts[1])
+			if clientAddr == "" {
+				continue
+			}
+			handleUploadGlobal(l, clientAddr, parts[2], parts[3])
+		case "download":
+			if len(parts) != 4 {
+				fmt.Println("Usage: download <client_id> <remote_path> <local_path>")
+				continue
+			}
+			clientAddr := getClientByID(l, parts[1])
+			if clientAddr == "" {
+				continue
+			}
+			handleDownloadGlobal(l, clientAddr, parts[2], parts[3])
+		case "forward":
+			if len(parts) < 2 {
+				fmt.Println("Usage: forward <client_id> <local_port> <remote_addr>")
+				fmt.Println("Example: forward 1 8080 10.0.0.5:80")
+				continue
+			}
+			if len(parts) != 4 {
+				fmt.Println("Usage: forward <client_id> <local_port> <remote_addr>")
+				continue
+			}
+			if !strings.Contains(parts[3], ":") {
+				fmt.Println("Error: remote address must include port (format: host:port)")
+				fmt.Println("Example: forward 1 8080 10.0.0.5:80")
+				fmt.Println("         forward 1 8080 127.0.0.1:8080")
+				continue
+			}
+			clientAddr := getClientByID(l, parts[1])
+			if clientAddr == "" {
+				continue
+			}
+			handleForward(l, clientAddr, parts[2], parts[3])
+		case "forwards":
+			listForwards(l)
+		case "socks":
+			if len(parts) == 1 {
+				listSocks(l)
+				continue
+			}
 			if len(parts) != 3 {
 				fmt.Println("Usage: socks <client_id> <local_port>")
 				fmt.Println("Example: socks 1 1080")
@@ -610,6 +748,116 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 type deadlineReader interface {
 	Read([]byte) (int, error)
 	SetReadDeadline(time.Time) error
+}
+
+// shellCompleter provides tab completion for the interactive shell
+type shellCompleter struct {
+	listener server.ListenerInterface
+}
+
+func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int) {
+	// Get the current line up to cursor position
+	lineStr := string(line[:pos])
+	parts := strings.Fields(lineStr)
+	
+	// List of all available commands
+	commands := []string{
+		"ls", "dir", "help", "shell", "upload", "download",
+		"forward", "forwards", "socks", "stop", "exit",
+	}
+	
+	// If we're at the start or only have partial first word, complete commands
+	if len(parts) == 0 || (len(parts) == 1 && !strings.HasSuffix(lineStr, " ")) {
+		prefix := ""
+		if len(parts) == 1 {
+			prefix = parts[0]
+		}
+		
+		var suggestions [][]rune
+		for _, cmd := range commands {
+			if strings.HasPrefix(cmd, prefix) {
+				suggestions = append(suggestions, []rune(cmd[len(prefix):]))
+			}
+		}
+		return suggestions, len(prefix)
+	}
+	
+	// For commands that need client ID, complete with client numbers
+	if len(parts) >= 1 {
+		cmd := parts[0]
+		needsClientID := cmd == "shell" || cmd == "upload" || cmd == "download" || 
+			cmd == "forward" || cmd == "socks"
+		
+		if needsClientID && (len(parts) == 1 || (len(parts) == 2 && !strings.HasSuffix(lineStr, " "))) {
+			// Complete client IDs
+			clients := c.listener.GetClients()
+			var suggestions [][]rune
+			prefix := ""
+			if len(parts) == 2 {
+				prefix = parts[1]
+			}
+			
+			for i := range clients {
+				clientID := fmt.Sprintf("%d", i+1)
+				if strings.HasPrefix(clientID, prefix) {
+					suggestions = append(suggestions, []rune(clientID[len(prefix):]))
+				}
+			}
+			return suggestions, len(prefix)
+		}
+		
+		// For "stop" command, complete with "forward" or "socks"
+		if cmd == "stop" && (len(parts) == 1 || (len(parts) == 2 && !strings.HasSuffix(lineStr, " "))) {
+			stopTargets := []string{"forward", "socks"}
+			prefix := ""
+			if len(parts) == 2 {
+				prefix = parts[1]
+			}
+			
+			var suggestions [][]rune
+			for _, target := range stopTargets {
+				if strings.HasPrefix(target, prefix) {
+					suggestions = append(suggestions, []rune(target[len(prefix):]))
+				}
+			}
+			return suggestions, len(prefix)
+		}
+	}
+	
+	return nil, 0
+}
+
+// logRedirector captures log output and writes it above the readline prompt
+type logRedirector struct {
+	rl  *readline.Instance
+	buf []byte
+	mu  sync.Mutex
+}
+
+func newLogRedirector() *logRedirector {
+	return &logRedirector{
+		buf: make([]byte, 0, 1024),
+	}
+}
+
+func (lr *logRedirector) setReadline(rl *readline.Instance) {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+	lr.rl = rl
+}
+
+func (lr *logRedirector) Write(p []byte) (n int, err error) {
+	lr.mu.Lock()
+	defer lr.mu.Unlock()
+	
+	if lr.rl != nil {
+		// Use readline's output mechanism to print above the prompt
+		_, err = lr.rl.Stdout().Write(p)
+		return len(p), err
+	}
+	
+	// Fallback to os.Stderr if readline not initialized yet
+	return os.Stderr.Write(p)
 }
 
 // drainPendingInput consumes any pending stdin bytes without blocking indefinitely.
