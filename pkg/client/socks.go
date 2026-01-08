@@ -5,12 +5,12 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/frjcomp/gots/pkg/logging"
 	"github.com/frjcomp/gots/pkg/protocol"
 )
 
@@ -47,7 +47,7 @@ func (sh *SocksHandler) HandleSocksStart(socksID string) error {
 	if _, exists := sh.connections[socksID]; !exists {
 		sh.connections[socksID] = make(map[string]net.Conn)
 		sh.stopChans[socksID] = make(map[string]chan struct{})
-		log.Printf("[+] SOCKS proxy %s started", socksID)
+		logging.Debugf("[+] SOCKS proxy %s started", socksID)
 	}
 	return nil
 }
@@ -65,7 +65,7 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 
 	conn, dialAddr, err := sh.dialWithIPv4Preference(targetAddr)
 	if err != nil {
-		log.Printf("[-] SOCKS %s conn %s: failed to connect to %s: %v", socksID, connID, targetAddr, err)
+		logging.Warnf("[-] SOCKS %s conn %s: failed to connect to %s: %v", socksID, connID, targetAddr, err)
 		sh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksClose, socksID, connID))
 		return fmt.Errorf("failed to connect to %s: %w", targetAddr, err)
 	}
@@ -73,7 +73,7 @@ func (sh *SocksHandler) HandleSocksConn(socksID, connID, targetAddr string) erro
 	sh.connections[socksID][connID] = conn
 	stopChan := make(chan struct{})
 	sh.stopChans[socksID][connID] = stopChan
-	log.Printf("[+] SOCKS %s conn %s: connected to %s (dial=%s)", socksID, connID, targetAddr, dialAddr)
+	logging.Debugf("[+] SOCKS %s conn %s: connected to %s (dial=%s)", socksID, connID, targetAddr, dialAddr)
 
 	// Signal server that connection is ready
 	sh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksOk, socksID, connID))
@@ -194,8 +194,10 @@ func (sh *SocksHandler) readFromTarget(socksID, connID string, conn net.Conn, st
 
 		n, err := conn.Read(buffer)
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("[-] SOCKS %s conn %s read error: %v", socksID, connID, err)
+			if err != io.EOF && !isBenignCloseError(err) {
+				logging.Warnf("[-] SOCKS %s conn %s read error: %v", socksID, connID, err)
+			} else {
+				logging.Debugf("[-] SOCKS %s conn %s read error: %v", socksID, connID, err)
 			}
 			return
 		}
@@ -231,7 +233,7 @@ func (sh *SocksHandler) HandleSocksData(socksID, connID, encodedData string) err
 
 	_, err = conn.Write(data)
 	if err != nil {
-		log.Printf("[-] SOCKS %s conn %s write error: %v", socksID, connID, err)
+		logging.Warnf("[-] SOCKS %s conn %s write error: %v", socksID, connID, err)
 		sh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdSocksClose, socksID, connID))
 		sh.mu.Lock()
 		sh.closeConnection(socksID, connID)
@@ -241,6 +243,8 @@ func (sh *SocksHandler) HandleSocksData(socksID, connID, encodedData string) err
 
 	return nil
 }
+
+// benign close detection moved to logutil.go
 
 // HandleSocksClose handles SOCKS_CLOSE command
 func (sh *SocksHandler) HandleSocksClose(socksID, connID string) {
@@ -269,7 +273,7 @@ func (sh *SocksHandler) closeConnection(socksID, connID string) {
 		if conn, exists := conns[connID]; exists {
 			conn.Close()
 			delete(conns, connID)
-			log.Printf("[+] Closed SOCKS %s conn %s", socksID, connID)
+			logging.Debugf("[+] Closed SOCKS %s conn %s", socksID, connID)
 		}
 	}
 }

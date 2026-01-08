@@ -5,11 +5,11 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"time"
 
+	"github.com/frjcomp/gots/pkg/logging"
 	"github.com/frjcomp/gots/pkg/protocol"
 )
 
@@ -107,7 +107,7 @@ func (sm *SocksManager) acceptConnections(proxy *SocksProxy) {
 			if !active {
 				return
 			}
-			log.Printf("[-] SOCKS %s accept error: %v", proxy.ID, err)
+			logging.Warnf("[-] SOCKS %s accept error: %v", proxy.ID, err)
 			continue
 		}
 
@@ -116,7 +116,7 @@ func (sm *SocksManager) acceptConnections(proxy *SocksProxy) {
 		connID := fmt.Sprintf("%d", proxy.connCount)
 		proxy.mu.Unlock()
 
-		log.Printf("[+] SOCKS %s: new connection %s from %s", proxy.ID, connID, conn.RemoteAddr())
+		logging.Debugf("[+] SOCKS %s: new connection %s from %s", proxy.ID, connID, conn.RemoteAddr())
 
 		// Handle SOCKS5 handshake and proxy
 		go sm.handleSocksConnection(proxy, connID, conn)
@@ -135,38 +135,38 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	buf := make([]byte, 257)
 	n, err := conn.Read(buf)
 	if err != nil || n < 2 {
-		log.Printf("[-] SOCKS %s conn %s: handshake read error", proxy.ID, connID)
+		logging.Warnf("[-] SOCKS %s conn %s: handshake read error", proxy.ID, connID)
 		return
 	}
 
 	version := buf[0]
 	if version != socks5Version {
-		log.Printf("[-] SOCKS %s conn %s: unsupported version %d", proxy.ID, connID, version)
+		logging.Warnf("[-] SOCKS %s conn %s: unsupported version %d", proxy.ID, connID, version)
 		return
 	}
 
 	// Send: [version, selected_auth_method]
 	_, err = conn.Write([]byte{socks5Version, socks5NoAuth})
 	if err != nil {
-		log.Printf("[-] SOCKS %s conn %s: handshake write error", proxy.ID, connID)
+		logging.Warnf("[-] SOCKS %s conn %s: handshake write error", proxy.ID, connID)
 		return
 	}
 
 	// Read request: [version, cmd, reserved, addr_type, addr, port]
 	n, err = conn.Read(buf)
 	if err != nil || n < 4 {
-		log.Printf("[-] SOCKS %s conn %s: request read error", proxy.ID, connID)
+		logging.Warnf("[-] SOCKS %s conn %s: request read error", proxy.ID, connID)
 		return
 	}
 
 	if buf[0] != socks5Version {
-		log.Printf("[-] SOCKS %s conn %s: bad request version", proxy.ID, connID)
+		logging.Warnf("[-] SOCKS %s conn %s: bad request version", proxy.ID, connID)
 		return
 	}
 
 	cmd := buf[1]
 	if cmd != socks5Connect {
-		log.Printf("[-] SOCKS %s conn %s: unsupported command %d", proxy.ID, connID, cmd)
+		logging.Warnf("[-] SOCKS %s conn %s: unsupported command %d", proxy.ID, connID, cmd)
 		// Send failure response
 		conn.Write([]byte{socks5Version, socks5GeneralFailure, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0})
 		return
@@ -181,7 +181,7 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	switch addrType {
 	case socks5IPv4:
 		if n < 10 {
-			log.Printf("[-] SOCKS %s conn %s: incomplete IPv4 address", proxy.ID, connID)
+			logging.Warnf("[-] SOCKS %s conn %s: incomplete IPv4 address", proxy.ID, connID)
 			return
 		}
 		targetAddr = fmt.Sprintf("%d.%d.%d.%d", buf[4], buf[5], buf[6], buf[7])
@@ -191,7 +191,7 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	case socks5Domain:
 		domainLen := int(buf[4])
 		if n < 5+domainLen+2 {
-			log.Printf("[-] SOCKS %s conn %s: incomplete domain address", proxy.ID, connID)
+			logging.Warnf("[-] SOCKS %s conn %s: incomplete domain address", proxy.ID, connID)
 			return
 		}
 		targetAddr = string(buf[5 : 5+domainLen])
@@ -201,7 +201,7 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 		responseAddr = buf[4 : 5+domainLen]
 	case socks5IPv6:
 		if n < 22 {
-			log.Printf("[-] SOCKS %s conn %s: incomplete IPv6 address", proxy.ID, connID)
+			logging.Warnf("[-] SOCKS %s conn %s: incomplete IPv6 address", proxy.ID, connID)
 			return
 		}
 		// Format IPv6 address
@@ -218,7 +218,7 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 		responseAddrType = socks5IPv6
 		responseAddr = buf[4:20]
 	default:
-		log.Printf("[-] SOCKS %s conn %s: unsupported address type %d", proxy.ID, connID, addrType)
+		logging.Warnf("[-] SOCKS %s conn %s: unsupported address type %d", proxy.ID, connID, addrType)
 		conn.Write([]byte{socks5Version, socks5GeneralFailure, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0})
 		return
 	}
@@ -226,7 +226,7 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	port := binary.BigEndian.Uint16(buf[addrEnd : addrEnd+2])
 	targetAddr = fmt.Sprintf("%s:%d", targetAddr, port)
 
-	log.Printf("[+] SOCKS %s conn %s: connecting to %s", proxy.ID, connID, targetAddr)
+	logging.Debugf("[+] SOCKS %s conn %s: connecting to %s", proxy.ID, connID, targetAddr)
 
 	// Create a ready signal for this connection
 	readyChan := make(chan bool, 1)
@@ -240,9 +240,9 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	// Wait for client to establish remote connection (with timeout)
 	select {
 	case <-readyChan:
-		log.Printf("[+] SOCKS %s conn %s: remote connection established", proxy.ID, connID)
+		logging.Debugf("[+] SOCKS %s conn %s: remote connection established", proxy.ID, connID)
 	case <-time.After(5 * time.Second):
-		log.Printf("[-] SOCKS %s conn %s: timeout waiting for remote connection", proxy.ID, connID)
+		logging.Warnf("[-] SOCKS %s conn %s: timeout waiting for remote connection", proxy.ID, connID)
 		// Send failure response to SOCKS client before closing
 		_, _ = conn.Write([]byte{socks5Version, socks5HostUnreachable, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0})
 		proxy.mu.Lock()
@@ -258,7 +258,7 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	response = append(response, responseAddr...)
 	response = append(response, buf[addrEnd:addrEnd+2]...) // port
 	if _, err := conn.Write(response); err != nil {
-		log.Printf("[-] SOCKS %s conn %s: failed to send success response", proxy.ID, connID)
+		logging.Warnf("[-] SOCKS %s conn %s: failed to send success response", proxy.ID, connID)
 		proxy.mu.Lock()
 		delete(proxy.connReady, connID)
 		proxy.mu.Unlock()
@@ -282,15 +282,17 @@ func (sm *SocksManager) relayData(proxy *SocksProxy, connID string, conn net.Con
 		delete(proxy.connections, connID)
 		delete(proxy.connReady, connID)
 		proxy.mu.Unlock()
-		log.Printf("[+] SOCKS %s conn %s: relay ended", proxy.ID, connID)
+		logging.Debugf("[+] SOCKS %s conn %s: relay ended", proxy.ID, connID)
 	}()
 
 	buffer := make([]byte, 32768)
 	for {
 		n, err := conn.Read(buffer)
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("[-] SOCKS %s conn %s read error: %v", proxy.ID, connID, err)
+			if err != io.EOF && !isBenignCloseError(err) {
+				logging.Warnf("[-] SOCKS %s conn %s read error: %v", proxy.ID, connID, err)
+			} else {
+				logging.Debugf("[-] SOCKS %s conn %s read error: %v", proxy.ID, connID, err)
 			}
 			return
 		}
@@ -302,6 +304,8 @@ func (sm *SocksManager) relayData(proxy *SocksProxy, connID string, conn net.Con
 		}
 	}
 }
+
+// benign close detection moved to logutil.go
 
 // SignalSocksReady signals that a remote connection is established
 func (sm *SocksManager) SignalSocksReady(socksID, connID string) {
@@ -391,7 +395,7 @@ func (sm *SocksManager) StopSocks(id string) error {
 	proxy.Listener.Close()
 	delete(sm.proxies, id)
 
-	log.Printf("[+] Stopped SOCKS proxy %s", id)
+	logging.Infof("[+] Stopped SOCKS proxy %s", id)
 	return nil
 }
 

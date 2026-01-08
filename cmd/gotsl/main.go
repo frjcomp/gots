@@ -15,6 +15,7 @@ import (
 	"github.com/frjcomp/gots/pkg/certs"
 	"github.com/frjcomp/gots/pkg/compression"
 	"github.com/frjcomp/gots/pkg/config"
+	"github.com/frjcomp/gots/pkg/logging"
 	"github.com/frjcomp/gots/pkg/protocol"
 	"github.com/frjcomp/gots/pkg/server"
 	"github.com/frjcomp/gots/pkg/version"
@@ -36,12 +37,25 @@ func main() {
 	var useSharedSecret bool
 	var port string
 	var networkInterface string
+	var logLevel string
+	var quiet bool
 
 	flag.BoolVar(&useSharedSecret, "s", false, "Enable shared secret authentication")
 	flag.BoolVar(&useSharedSecret, "shared-secret", false, "Enable shared secret authentication")
 	flag.StringVar(&port, "port", "", "Port to listen on (required, no default)")
 	flag.StringVar(&networkInterface, "interface", "", "Network interface to bind to (required, no default)")
+	flag.StringVar(&logLevel, "log-level", "", "Log level: error|warn|info|debug (default info)")
+	flag.BoolVar(&quiet, "quiet", false, "Reduce logs to errors only (overrides log-level)")
 	flag.Parse()
+
+	// Initialize logging from env, then apply flags if provided
+	logging.InitFromEnv()
+	if logLevel != "" {
+		logging.SetLevelFromString(logLevel)
+	}
+	if quiet {
+		logging.SetQuiet(true)
+	}
 
 	// Validate required flags
 	if port == "" {

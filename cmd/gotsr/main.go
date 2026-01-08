@@ -8,6 +8,7 @@ import (
 
 	"github.com/frjcomp/gots/pkg/client"
 	"github.com/frjcomp/gots/pkg/config"
+	"github.com/frjcomp/gots/pkg/logging"
 	"github.com/frjcomp/gots/pkg/version"
 )
 
@@ -27,13 +28,26 @@ func main() {
 	var certFingerprint string
 	var target string
 	var maxRetriesStr string
+	var logLevel string
+	var quiet bool
 
 	flag.StringVar(&sharedSecret, "s", "", "Shared secret for authentication")
 	flag.StringVar(&sharedSecret, "shared-secret", "", "Shared secret for authentication")
 	flag.StringVar(&certFingerprint, "cert-fingerprint", "", "Expected server certificate SHA256 fingerprint")
 	flag.StringVar(&target, "target", "", "Target server address (host:port, required)")
 	flag.StringVar(&maxRetriesStr, "retries", "", "Maximum number of retries (required, 0 = infinite)")
+	flag.StringVar(&logLevel, "log-level", "", "Log level: error|warn|info|debug (default info)")
+	flag.BoolVar(&quiet, "quiet", false, "Reduce logs to errors only (overrides log-level)")
 	flag.Parse()
+
+	// Initialize logging from env, then apply flags if provided
+	logging.InitFromEnv()
+	if logLevel != "" {
+		logging.SetLevelFromString(logLevel)
+	}
+	if quiet {
+		logging.SetQuiet(true)
+	}
 
 	// Validate required flags
 	if target == "" {

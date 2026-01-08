@@ -4,11 +4,11 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"strings"
 	"sync"
 
+	"github.com/frjcomp/gots/pkg/logging"
 	"github.com/frjcomp/gots/pkg/protocol"
 )
 
@@ -34,7 +34,7 @@ func (fh *ForwardHandler) HandleForwardStart(fwdID, connID, targetAddr string) e
 	// Validate that targetAddr is in host:port format
 	if !strings.Contains(targetAddr, ":") {
 		err := fmt.Errorf("invalid target address format: %s (expected host:port, e.g., 127.0.0.1:8080)", targetAddr)
-		log.Printf("[-] %v", err)
+		logging.Warnf("[-] %v", err)
 		fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
 		return err
 	}
@@ -44,21 +44,21 @@ func (fh *ForwardHandler) HandleForwardStart(fwdID, connID, targetAddr string) e
 
 	// Check if already exists
 	if _, exists := fh.connections[fwdID]; exists {
-		log.Printf("[-] Forward %s already exists, closing old connection", fwdID)
+		logging.Warnf("[-] Forward %s already exists, closing old connection", fwdID)
 		fh.closeConnection(fwdID)
 	}
 
 	// Connect to target
 	conn, err := net.Dial("tcp", targetAddr)
 	if err != nil {
-		log.Printf("[-] Failed to connect to %s: %v", targetAddr, err)
+		logging.Warnf("[-] Failed to connect to %s: %v", targetAddr, err)
 		fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
 		return fmt.Errorf("failed to connect to %s: %w", targetAddr, err)
 	}
 
 	fh.connections[fwdID] = conn
 	fh.connIDs[fwdID] = connID
-	log.Printf("[+] Forward %s: connected to %s", fwdID, targetAddr)
+	logging.Debugf("[+] Forward %s: connected to %s", fwdID, targetAddr)
 
 	// Start reading from target and sending back
 	go fh.readFromTarget(fwdID, connID, conn)
@@ -80,8 +80,10 @@ func (fh *ForwardHandler) readFromTarget(fwdID, connID string, conn net.Conn) {
 	for {
 		n, err := conn.Read(buffer)
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("[-] Forward %s read error: %v", fwdID, err)
+			if err != io.EOF && !isBenignCloseError(err) {
+				logging.Warnf("[-] Forward %s read error: %v", fwdID, err)
+			} else {
+				logging.Debugf("[-] Forward %s read error: %v", fwdID, err)
 			}
 			// Notify server that connection is closed
 			fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
@@ -113,7 +115,7 @@ func (fh *ForwardHandler) HandleForwardData(fwdID, connID, encodedData string) e
 
 	_, err = conn.Write(data)
 	if err != nil {
-		log.Printf("[-] Forward %s write error: %v", fwdID, err)
+		logging.Warnf("[-] Forward %s write error: %v", fwdID, err)
 		fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
 		fh.mu.Lock()
 		fh.closeConnection(fwdID)
@@ -137,7 +139,7 @@ func (fh *ForwardHandler) closeConnection(fwdID string) {
 		conn.Close()
 		delete(fh.connections, fwdID)
 		delete(fh.connIDs, fwdID)
-		log.Printf("[+] Closed forward %s", fwdID)
+		logging.Debugf("[+] Closed forward %s", fwdID)
 	}
 }
 
@@ -152,3 +154,5 @@ func (fh *ForwardHandler) Close() {
 		delete(fh.connIDs, fwdID)
 	}
 }
+
+// benign close detection moved to logutil.go

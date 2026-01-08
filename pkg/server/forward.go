@@ -4,10 +4,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sync"
 
+	"github.com/frjcomp/gots/pkg/logging"
 	"github.com/frjcomp/gots/pkg/protocol"
 )
 
@@ -78,7 +78,7 @@ func (fm *ForwardManager) acceptConnections(info *ForwardInfo, sendFunc func(str
 			if !active {
 				return
 			}
-			log.Printf("[-] Forward %s accept error: %v", info.ID, err)
+			logging.Warnf("[-] Forward %s accept error: %v", info.ID, err)
 			continue
 		}
 
@@ -87,7 +87,7 @@ func (fm *ForwardManager) acceptConnections(info *ForwardInfo, sendFunc func(str
 		connID := fmt.Sprintf("%d", info.ConnCount)
 		info.mu.Unlock()
 
-		log.Printf("[+] Forward %s: new connection %s from %s", info.ID, connID, conn.RemoteAddr())
+		logging.Debugf("[+] Forward %s: new connection %s from %s", info.ID, connID, conn.RemoteAddr())
 
 		// Store the local connection so we can write responses to it
 		info.mu.Lock()
@@ -116,8 +116,10 @@ func (fm *ForwardManager) forwardConnection(info *ForwardInfo, connID string, co
 	for {
 		n, err := conn.Read(buffer)
 		if err != nil {
-			if err != io.EOF {
-				log.Printf("[-] Forward %s conn %s read error: %v", info.ID, connID, err)
+			if err != io.EOF && !isBenignCloseError(err) {
+				logging.Warnf("[-] Forward %s conn %s read error: %v", info.ID, connID, err)
+			} else {
+				logging.Debugf("[-] Forward %s conn %s read error: %v", info.ID, connID, err)
 			}
 			// Send stop signal to close remote connection
 			sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, info.ID))
@@ -176,7 +178,7 @@ func (fm *ForwardManager) StopForward(id string) error {
 	info.Listener.Close()
 	delete(fm.forwards, id)
 
-	log.Printf("[+] Stopped forward %s", id)
+	logging.Infof("[+] Stopped forward %s", id)
 	return nil
 }
 
@@ -205,3 +207,5 @@ func (fm *ForwardManager) StopAll() {
 		delete(fm.forwards, id)
 	}
 }
+
+// benign close detection moved to logutil.go
