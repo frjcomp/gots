@@ -175,6 +175,8 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 	addrType := buf[3]
 	var targetAddr string
 	var addrEnd int
+	var responseAddrType byte
+	var responseAddr []byte
 
 	switch addrType {
 	case socks5IPv4:
@@ -184,6 +186,8 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 		}
 		targetAddr = fmt.Sprintf("%d.%d.%d.%d", buf[4], buf[5], buf[6], buf[7])
 		addrEnd = 8
+		responseAddrType = socks5IPv4
+		responseAddr = buf[4:8]
 	case socks5Domain:
 		domainLen := int(buf[4])
 		if n < 5+domainLen+2 {
@@ -192,6 +196,9 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 		}
 		targetAddr = string(buf[5 : 5+domainLen])
 		addrEnd = 5 + domainLen
+		// For domain, echo back as domain in response
+		responseAddrType = socks5Domain
+		responseAddr = buf[4 : 5+domainLen]
 	case socks5IPv6:
 		if n < 22 {
 			log.Printf("[-] SOCKS %s conn %s: incomplete IPv6 address", proxy.ID, connID)
@@ -208,6 +215,8 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 			binary.BigEndian.Uint16(buf[16:18]),
 			binary.BigEndian.Uint16(buf[18:20]))
 		addrEnd = 20
+		responseAddrType = socks5IPv6
+		responseAddr = buf[4:20]
 	default:
 		log.Printf("[-] SOCKS %s conn %s: unsupported address type %d", proxy.ID, connID, addrType)
 		conn.Write([]byte{socks5Version, socks5GeneralFailure, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0})
@@ -244,7 +253,11 @@ func (sm *SocksManager) handleSocksConnection(proxy *SocksProxy, connID string, 
 
 	// Send success response now that remote side is ready
 	// Response: [version, status, reserved, addr_type, addr, port]
-	if _, err := conn.Write([]byte{socks5Version, socks5Success, 0x00, socks5IPv4, 0, 0, 0, 0, 0, 0}); err != nil {
+	// Build response matching the request address type
+	response := []byte{socks5Version, socks5Success, 0x00, responseAddrType}
+	response = append(response, responseAddr...)
+	response = append(response, buf[addrEnd:addrEnd+2]...) // port
+	if _, err := conn.Write(response); err != nil {
 		log.Printf("[-] SOCKS %s conn %s: failed to send success response", proxy.ID, connID)
 		proxy.mu.Lock()
 		delete(proxy.connReady, connID)
