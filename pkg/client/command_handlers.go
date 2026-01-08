@@ -517,13 +517,14 @@ func (rc *ReverseClient) handleForwardDataCommand(command string) error {
 
 // handleForwardStopCommand handles FORWARD_STOP command
 func (rc *ReverseClient) handleForwardStopCommand(command string) error {
-	// Format: FORWARD_STOP <fwd_id>
+	// Format: FORWARD_STOP <fwd_id> <conn_id>
 	parts := strings.Fields(command)
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		return fmt.Errorf("invalid FORWARD_STOP command format")
 	}
 	fwdID := parts[1]
-	rc.forwardHandler.HandleForwardStop(fwdID)
+	connID := parts[2]
+	rc.forwardHandler.HandleForwardStop(fwdID, connID)
 	return nil
 }
 

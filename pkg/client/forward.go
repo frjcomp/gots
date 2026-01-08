@@ -14,8 +14,7 @@ import (
 
 // ForwardHandler manages port forwarding on the client side
 type ForwardHandler struct {
-	connections map[string]net.Conn // key: fwdID
-	connIDs     map[string]string    // fwdID -> connID
+	connections map[string]map[string]net.Conn // fwdID -> connID -> conn
 	mu          sync.RWMutex
 	sendFunc    func(string)
 }
@@ -23,8 +22,7 @@ type ForwardHandler struct {
 // NewForwardHandler creates a new forward handler
 func NewForwardHandler(sendFunc func(string)) *ForwardHandler {
 	return &ForwardHandler{
-		connections: make(map[string]net.Conn),
-		connIDs:     make(map[string]string),
+		connections: make(map[string]map[string]net.Conn),
 		sendFunc:    sendFunc,
 	}
 }
@@ -35,29 +33,32 @@ func (fh *ForwardHandler) HandleForwardStart(fwdID, connID, targetAddr string) e
 	if !strings.Contains(targetAddr, ":") {
 		err := fmt.Errorf("invalid target address format: %s (expected host:port, e.g., 127.0.0.1:8080)", targetAddr)
 		logging.Warnf("[-] %v", err)
-		fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
+		fh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdForwardStop, fwdID, connID))
 		return err
 	}
 
 	fh.mu.Lock()
-	defer fh.mu.Unlock()
-
-	// Check if already exists
-	if _, exists := fh.connections[fwdID]; exists {
-		logging.Warnf("[-] Forward %s already exists, closing old connection", fwdID)
-		fh.closeConnection(fwdID)
+	if _, exists := fh.connections[fwdID]; !exists {
+		fh.connections[fwdID] = make(map[string]net.Conn)
 	}
+	// If same connID exists, close it before replacing
+	if existing, exists := fh.connections[fwdID][connID]; exists {
+		existing.Close()
+		delete(fh.connections[fwdID], connID)
+	}
+	fh.mu.Unlock()
 
 	// Connect to target
 	conn, err := net.Dial("tcp", targetAddr)
 	if err != nil {
 		logging.Warnf("[-] Failed to connect to %s: %v", targetAddr, err)
-		fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
+		fh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdForwardStop, fwdID, connID))
 		return fmt.Errorf("failed to connect to %s: %w", targetAddr, err)
 	}
 
-	fh.connections[fwdID] = conn
-	fh.connIDs[fwdID] = connID
+	fh.mu.Lock()
+	fh.connections[fwdID][connID] = conn
+	fh.mu.Unlock()
 	logging.Debugf("[+] Forward %s: connected to %s", fwdID, targetAddr)
 
 	// Start reading from target and sending back
@@ -70,8 +71,12 @@ func (fh *ForwardHandler) HandleForwardStart(fwdID, connID, targetAddr string) e
 func (fh *ForwardHandler) readFromTarget(fwdID, connID string, conn net.Conn) {
 	defer func() {
 		fh.mu.Lock()
-		delete(fh.connections, fwdID)
-		delete(fh.connIDs, fwdID)
+		if conns, ok := fh.connections[fwdID]; ok {
+			delete(conns, connID)
+			if len(conns) == 0 {
+				delete(fh.connections, fwdID)
+			}
+		}
 		fh.mu.Unlock()
 		conn.Close()
 	}()
@@ -86,7 +91,7 @@ func (fh *ForwardHandler) readFromTarget(fwdID, connID string, conn net.Conn) {
 				logging.Debugf("[-] Forward %s read error: %v", fwdID, err)
 			}
 			// Notify server that connection is closed
-			fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
+			fh.sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdForwardStop, fwdID, connID))
 			return
 		}
 
@@ -101,45 +106,48 @@ func (fh *ForwardHandler) readFromTarget(fwdID, connID string, conn net.Conn) {
 // HandleForwardData handles incoming FORWARD_DATA from server
 func (fh *ForwardHandler) HandleForwardData(fwdID, connID, encodedData string) error {
 	fh.mu.RLock()
-	conn, exists := fh.connections[fwdID]
+	conns, exists := fh.connections[fwdID]
+	if exists {
+		conn, ok := conns[connID]
+		if ok {
+			fh.mu.RUnlock()
+			data, err := base64.StdEncoding.DecodeString(encodedData)
+			if err != nil {
+				return fmt.Errorf("failed to decode data: %w", err)
+			}
+
+			_, err = conn.Write(data)
+			if err != nil {
+				logging.Warnf("[-] Forward %s conn %s write error: %v", fwdID, connID, err)
+				fh.HandleForwardStop(fwdID, connID)
+				return err
+			}
+			return nil
+		}
+	}
 	fh.mu.RUnlock()
 
-	if !exists {
-		return fmt.Errorf("forward %s not found", fwdID)
-	}
-
-	data, err := base64.StdEncoding.DecodeString(encodedData)
-	if err != nil {
-		return fmt.Errorf("failed to decode data: %w", err)
-	}
-
-	_, err = conn.Write(data)
-	if err != nil {
-		logging.Warnf("[-] Forward %s write error: %v", fwdID, err)
-		fh.sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, fwdID))
-		fh.mu.Lock()
-		fh.closeConnection(fwdID)
-		fh.mu.Unlock()
-		return err
-	}
-
-	return nil
+	return fmt.Errorf("forward %s conn %s not found", fwdID, connID)
 }
 
 // HandleForwardStop handles FORWARD_STOP command
-func (fh *ForwardHandler) HandleForwardStop(fwdID string) {
+func (fh *ForwardHandler) HandleForwardStop(fwdID, connID string) {
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
-	fh.closeConnection(fwdID)
+	fh.closeConnection(fwdID, connID)
 }
 
 // closeConnection closes a connection (must be called with lock held)
-func (fh *ForwardHandler) closeConnection(fwdID string) {
-	if conn, exists := fh.connections[fwdID]; exists {
-		conn.Close()
-		delete(fh.connections, fwdID)
-		delete(fh.connIDs, fwdID)
-		logging.Debugf("[+] Closed forward %s", fwdID)
+func (fh *ForwardHandler) closeConnection(fwdID, connID string) {
+	if conns, ok := fh.connections[fwdID]; ok {
+		if conn, exists := conns[connID]; exists {
+			conn.Close()
+			delete(conns, connID)
+			logging.Debugf("[+] Closed forward %s conn %s", fwdID, connID)
+		}
+		if len(conns) == 0 {
+			delete(fh.connections, fwdID)
+		}
 	}
 }
 
@@ -148,10 +156,12 @@ func (fh *ForwardHandler) Close() {
 	fh.mu.Lock()
 	defer fh.mu.Unlock()
 
-	for fwdID, conn := range fh.connections {
-		conn.Close()
+	for fwdID, conns := range fh.connections {
+		for connID, conn := range conns {
+			conn.Close()
+			delete(conns, connID)
+		}
 		delete(fh.connections, fwdID)
-		delete(fh.connIDs, fwdID)
 	}
 }
 

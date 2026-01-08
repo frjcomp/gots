@@ -122,7 +122,7 @@ func (fm *ForwardManager) forwardConnection(info *ForwardInfo, connID string, co
 				logging.Debugf("[-] Forward %s conn %s read error: %v", info.ID, connID, err)
 			}
 			// Send stop signal to close remote connection
-			sendFunc(fmt.Sprintf("%s %s\n", protocol.CmdForwardStop, info.ID))
+			sendFunc(fmt.Sprintf("%s %s %s\n", protocol.CmdForwardStop, info.ID, connID))
 			return
 		}
 
@@ -159,6 +159,24 @@ func (fm *ForwardManager) HandleForwardData(fwdID, connID, encodedData string) e
 
 	_, err = conn.Write(data)
 	return err
+}
+
+// HandleForwardStop closes a specific forward connection
+func (fm *ForwardManager) HandleForwardStop(fwdID, connID string) error {
+	fm.mu.RLock()
+	info, exists := fm.forwards[fwdID]
+	fm.mu.RUnlock()
+	if !exists {
+		return fmt.Errorf("forward %s not found", fwdID)
+	}
+
+	info.mu.Lock()
+	defer info.mu.Unlock()
+	if conn, ok := info.connections[connID]; ok {
+		conn.Close()
+		delete(info.connections, connID)
+	}
+	return nil
 }
 
 // StopForward stops a port forward

@@ -281,6 +281,21 @@ func (l *Listener) handleClient(conn net.Conn) {
 				continue
 			}
 
+			// Check for FORWARD_STOP from client to close specific forward connection
+			if strings.HasPrefix(currentLine, protocol.CmdForwardStop+" ") {
+				parts := strings.Fields(strings.TrimSpace(currentLine))
+				// Expect: FORWARD_STOP <forward_id> <conn_id>
+				if len(parts) >= 3 {
+					forwardID := parts[1]
+					connID := parts[2]
+					if err := l.forwardManager.HandleForwardStop(forwardID, connID); err != nil {
+						log.Printf("[-] Forward %s conn %s handle stop error: %v", forwardID, connID, err)
+					}
+				}
+				responseBuffer.Reset()
+				continue
+			}
+
 			// Check for PTY data
 			if strings.HasPrefix(currentLine, protocol.CmdPtyData+" ") {
 				encoded := strings.TrimPrefix(currentLine, protocol.CmdPtyData+" ")

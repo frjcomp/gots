@@ -34,9 +34,9 @@ const (
 	CmdPtyExit   = "PTY_EXIT"   // Exit PTY mode
 
 	// Port Forwarding Commands
-	CmdForwardStart = "FORWARD_START" // Start port forward: FORWARD_START <fwd_id> <target_host>:<target_port>
+	CmdForwardStart = "FORWARD_START" // Start port forward: FORWARD_START <fwd_id> <conn_id> <target_host>:<target_port>
 	CmdForwardData  = "FORWARD_DATA"  // Forward data: FORWARD_DATA <fwd_id> <conn_id> <base64_data>
-	CmdForwardStop  = "FORWARD_STOP"  // Stop port forward: FORWARD_STOP <fwd_id>
+	CmdForwardStop  = "FORWARD_STOP"  // Stop port forward connection: FORWARD_STOP <fwd_id> <conn_id>
 
 	// SOCKS5 Proxy Commands
 	CmdSocksStart = "SOCKS_START" // Start SOCKS5 proxy: SOCKS_START <socks_id>
