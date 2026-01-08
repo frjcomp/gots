@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"crypto/tls"
 	"github.com/frjcomp/gots/pkg/compression"
 	"github.com/frjcomp/gots/pkg/config"
 	"github.com/frjcomp/gots/pkg/protocol"
-    "crypto/tls"
-    "github.com/frjcomp/gots/pkg/server"
+	"github.com/frjcomp/gots/pkg/server"
 )
 
 // TestCompressDecompressRoundTrip verifies that data can be compressed to hex and decompressed back identically
@@ -104,7 +104,7 @@ func TestDecompressCorruptedGzip(t *testing.T) {
 func TestRunListenerArgValidation(t *testing.T) {
 	// Test with missing required flags - should fail in main() before reaching runListener
 	// Since we validate in main(), we test the config validation instead
-	
+
 	// Invalid port should be caught
 	_, err := config.LoadServerConfig("not-a-port", "0.0.0.0", false)
 	if err == nil {
@@ -280,11 +280,11 @@ func TestHandleDownloadGlobalGetResponseError(t *testing.T) {
 // Additional tests for better coverage
 func TestHandleUploadGlobalEmptyRemotePath(t *testing.T) {
 	ml := &mockListener{
-		clients: []string{"192.168.1.2:1234"},
+		clients:   []string{"192.168.1.2:1234"},
 		responses: []string{"OK"},
 	}
 	tmpfile := t.TempDir() + "/test.txt"
-	
+
 	// Create test file
 	err := os.WriteFile(tmpfile, []byte("test content"), 0644)
 	if err != nil {
@@ -305,7 +305,7 @@ func TestHandleUploadGlobalSendCommandError(t *testing.T) {
 		sendErr: bytes.ErrTooLarge,
 	}
 	tmpfile := t.TempDir() + "/test.txt"
-	
+
 	err := os.WriteFile(tmpfile, []byte("test"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -320,11 +320,11 @@ func TestHandleUploadGlobalSendCommandError(t *testing.T) {
 func TestHandleUploadGlobalMultipleErrors(t *testing.T) {
 	// Test multiple send errors in sequence
 	ml := &mockListener{
-		clients: []string{"192.168.1.2:1234"},
+		clients:  []string{"192.168.1.2:1234"},
 		sendErrs: []error{nil, nil, bytes.ErrTooLarge}, // Fail on 3rd send (END_UPLOAD)
 	}
 	tmpfile := t.TempDir() + "/test.txt"
-	
+
 	err := os.WriteFile(tmpfile, []byte("test"), 0644)
 	if err != nil {
 		t.Fatalf("Failed to create test file: %v", err)
@@ -339,7 +339,7 @@ func TestHandleUploadGlobalMultipleErrors(t *testing.T) {
 func TestHandleDownloadGlobalInvalidRemotePath(t *testing.T) {
 	ml := &mockListener{clients: []string{"192.168.1.2:1234"}}
 	tmpfile := t.TempDir() + "/out.txt"
-	
+
 	// Test with empty remote path
 	result := handleDownloadGlobal(ml, "192.168.1.2:1234", "", tmpfile)
 	// Should continue (true) as path validation doesn't fail the operation
@@ -356,7 +356,7 @@ func TestHandleDownloadGlobalSuccessfulDownload(t *testing.T) {
 	}
 
 	ml := &mockListener{
-		clients: []string{"192.168.1.2:1234"},
+		clients:   []string{"192.168.1.2:1234"},
 		responses: []string{protocol.EndOfOutputMarker + protocol.DataPrefix + compressed + protocol.EndOfOutputMarker},
 	}
 	tmpfile := t.TempDir() + "/downloaded.txt"
@@ -379,7 +379,7 @@ func TestHandleDownloadGlobalSuccessfulDownload(t *testing.T) {
 
 func TestHandleDownloadGlobalInvalidCompressedData(t *testing.T) {
 	ml := &mockListener{
-		clients: []string{"192.168.1.2:1234"},
+		clients:   []string{"192.168.1.2:1234"},
 		responses: []string{"invalid-hex-data!!!"},
 	}
 	tmpfile := t.TempDir() + "/out.txt"
@@ -412,7 +412,7 @@ func TestHandleDownloadGlobalFileWriteError(t *testing.T) {
 	}
 
 	ml := &mockListener{
-		clients: []string{"192.168.1.2:1234"},
+		clients:   []string{"192.168.1.2:1234"},
 		responses: []string{compressed},
 	}
 
@@ -497,5 +497,57 @@ func TestListSocksWithOneProxy(t *testing.T) {
 	}
 	if !strings.Contains(out, "test-socks") {
 		t.Fatalf("expected proxy ID in output, got: %q", out)
+	}
+}
+
+type readResult struct {
+	n   int
+	err error
+}
+
+type mockDeadlineReader struct {
+	reads       []readResult
+	deadlineErr error
+	readCalls   int
+	setCalls    int
+}
+
+func (m *mockDeadlineReader) Read(p []byte) (int, error) {
+	if m.readCalls >= len(m.reads) {
+		return 0, io.EOF
+	}
+	res := m.reads[m.readCalls]
+	m.readCalls++
+	return res.n, res.err
+}
+
+func (m *mockDeadlineReader) SetReadDeadline(time.Time) error {
+	m.setCalls++
+	return m.deadlineErr
+}
+
+func TestDrainPendingInputSkipsWhenDeadlineUnsupported(t *testing.T) {
+	m := &mockDeadlineReader{deadlineErr: io.ErrClosedPipe}
+	drainPendingInput(m)
+
+	if m.readCalls != 0 {
+		t.Fatalf("expected no reads when deadline unsupported, got %d", m.readCalls)
+	}
+	if m.setCalls != 1 {
+		t.Fatalf("expected a single SetReadDeadline attempt, got %d", m.setCalls)
+	}
+}
+
+func TestDrainPendingInputStopsAfterDraining(t *testing.T) {
+	m := &mockDeadlineReader{
+		reads: []readResult{{n: 3, err: nil}, {n: 0, err: io.EOF}},
+	}
+	drainPendingInput(m)
+
+	if m.readCalls != 2 {
+		t.Fatalf("expected two reads before exit, got %d", m.readCalls)
+	}
+	if m.setCalls < 2 {
+		t.Fatalf("expected SetReadDeadline to be called at least twice, got %d", m.setCalls)
 	}
 }

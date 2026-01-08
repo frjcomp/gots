@@ -188,22 +188,22 @@ func interactiveShell(l server.ListenerInterface) {
 		case "forwards":
 			listForwards(l)
 		case "socks":
-				// If no args: list active SOCKS proxies
-				if len(parts) == 1 {
-					listSocks(l)
-					continue
-				}
-				// Expect: socks <client_id> <local_port>
-				if len(parts) != 3 {
-					fmt.Println("Usage: socks <client_id> <local_port>")
-					fmt.Println("Example: socks 1 1080")
-					continue
-				}
-				clientAddr := getClientByID(l, parts[1])
-				if clientAddr == "" {
-					continue
-				}
-				handleSocks(l, clientAddr, parts[2])
+			// If no args: list active SOCKS proxies
+			if len(parts) == 1 {
+				listSocks(l)
+				continue
+			}
+			// Expect: socks <client_id> <local_port>
+			if len(parts) != 3 {
+				fmt.Println("Usage: socks <client_id> <local_port>")
+				fmt.Println("Example: socks 1 1080")
+				continue
+			}
+			clientAddr := getClientByID(l, parts[1])
+			if clientAddr == "" {
+				continue
+			}
+			handleSocks(l, clientAddr, parts[2])
 		case "stop":
 			if len(parts) < 2 {
 				fmt.Println("Usage: stop forward <id> | stop socks <id>")
@@ -436,37 +436,19 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 		if oldState != nil {
 			term.Restore(fd, oldState)
 		}
-		
+
 		// Now disable terminal features that may have been enabled by the remote PTY
 		// Send these in cooked mode so the terminal processes them correctly
 		// - Disable mouse tracking (all modes)
-		// - Disable focus events  
+		// - Disable focus events
 		// - Reset bracketed paste mode
 		os.Stdout.WriteString("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1004l")
 		os.Stdout.Sync()
-		
+
 		// Flush stdin only if it's a real terminal (not a pipe/test)
 		// This consumes any pending input like terminal response escape sequences
 		if term.IsTerminal(fd) {
-			// Use a goroutine with timeout to avoid indefinite blocking
-			done := make(chan struct{})
-			go func() {
-				defer close(done)
-				discardBuf := make([]byte, 4096)
-				os.Stdin.SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-				for {
-					n, err := os.Stdin.Read(discardBuf)
-					if n == 0 || err != nil {
-						break
-					}
-				}
-			}()
-			select {
-			case <-done:
-			case <-time.After(20 * time.Millisecond):
-			}
-			os.Stdin.SetReadDeadline(time.Time{})
-			
+			drainPendingInput(os.Stdin)
 			// Also flush using platform-specific method if available
 			if err := flushStdin(); err != nil {
 				log.Printf("Warning: failed to flush stdin after PTY exit: %v", err)
@@ -595,23 +577,58 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 	wg.Wait()
 }
 
+// deadlineReader is the minimal interface needed to drain pending input with deadlines.
+type deadlineReader interface {
+	Read([]byte) (int, error)
+	SetReadDeadline(time.Time) error
+}
+
+// drainPendingInput consumes any pending stdin bytes without blocking indefinitely.
+// If deadlines are unsupported, it returns immediately to avoid stealing user input.
+func drainPendingInput(r deadlineReader) {
+	if r == nil {
+		return
+	}
+
+	if err := r.SetReadDeadline(time.Now().Add(10 * time.Millisecond)); err != nil {
+		return
+	}
+	defer r.SetReadDeadline(time.Time{})
+
+	buf := make([]byte, 4096)
+	deadline := time.Now().Add(20 * time.Millisecond)
+
+	for {
+		n, err := r.Read(buf)
+		if n == 0 || err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			return
+		}
+		if err := r.SetReadDeadline(time.Now().Add(10 * time.Millisecond)); err != nil {
+			return
+		}
+	}
+}
+
 func handleForward(l server.ListenerInterface, clientAddr, localPort, remoteAddr string) {
 	// Generate unique forward ID
 	fwdID := fmt.Sprintf("fwd-%d", time.Now().UnixNano())
-	
+
 	// Get access to the forward manager (via type assertion)
 	if listener, ok := l.(*server.Listener); ok {
 		// Create send function for this client
 		sendFunc := func(msg string) {
 			_ = l.SendCommand(clientAddr, msg)
 		}
-		
+
 		err := listener.GetForwardManager().StartForward(fwdID, localPort, remoteAddr, sendFunc)
 		if err != nil {
 			fmt.Printf("Failed to start forward: %v\n", err)
 			return
 		}
-		
+
 		fmt.Printf("✓ Port forward started: 127.0.0.1:%s -> %s (via %s)\n", localPort, remoteAddr, clientAddr)
 		fmt.Printf("  Forward ID: %s\n", fwdID)
 	} else {
@@ -656,20 +673,20 @@ func listSocks(l server.ListenerInterface) {
 func handleSocks(l server.ListenerInterface, clientAddr, localPort string) {
 	// Generate unique SOCKS ID
 	socksID := fmt.Sprintf("socks-%d", time.Now().UnixNano())
-	
+
 	// Get access to the SOCKS manager (via type assertion)
 	if listener, ok := l.(*server.Listener); ok {
 		// Create send function for this client
 		sendFunc := func(msg string) {
 			_ = l.SendCommand(clientAddr, msg)
 		}
-		
+
 		err := listener.GetSocksManager().StartSocks(socksID, localPort, sendFunc)
 		if err != nil {
 			fmt.Printf("Failed to start SOCKS proxy: %v\n", err)
 			return
 		}
-		
+
 		fmt.Printf("✓ SOCKS5 proxy started on 127.0.0.1:%s (via %s)\n", localPort, clientAddr)
 		fmt.Printf("  SOCKS ID: %s\n", socksID)
 		fmt.Printf("  Configure your browser/app to use SOCKS5 proxy at 127.0.0.1:%s\n", localPort)
