@@ -8,8 +8,9 @@ on:
     branches: [ main ]
 
 jobs:
-  linux-e2e:
+  default-journey:
     runs-on: ubuntu-latest
+    name: "E2E: Default Journey"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,9 +18,43 @@ jobs:
       - name: Build images
         run: docker compose -f integration/docker-compose.e2e.yml build
 
-      - name: Run headless e2e
+      - name: Run default journey
         run: docker compose -f integration/docker-compose.e2e.yml up tester --abort-on-container-exit
 
       - name: Show logs on failure
         if: failure()
         run: docker compose -f integration/docker-compose.e2e.yml logs
+
+  cert-verification:
+    runs-on: ubuntu-latest
+    name: "E2E: Certificate Verification"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build images
+        run: docker compose -f integration/docker-compose.cert-test.yml build
+
+      - name: Run certificate verification journey
+        run: docker compose -f integration/docker-compose.cert-test.yml up tester --abort-on-container-exit
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f integration/docker-compose.cert-test.yml logs
+
+  shared-secret:
+    runs-on: ubuntu-latest
+    name: "E2E: Shared Secret Authentication"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build images
+        run: docker compose -f integration/docker-compose.secret-test.yml build
+
+      - name: Run shared secret journey
+        run: docker compose -f integration/docker-compose.secret-test.yml up tester --abort-on-container-exit
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose -f integration/docker-compose.secret-test.yml logs
