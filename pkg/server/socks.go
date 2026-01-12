@@ -21,7 +21,7 @@ const (
 	socks5IPv4    = 0x01
 	socks5Domain  = 0x03
 	socks5IPv6    = 0x04
-	
+
 	socks5Success          = 0x00
 	socks5GeneralFailure   = 0x01
 	socks5ConnectionDenied = 0x05
@@ -30,9 +30,9 @@ const (
 
 // SocksConnection represents a single SOCKS5 connection
 type SocksConnection struct {
-	ID       string
+	ID         string
 	TargetAddr string
-	Active   bool
+	Active     bool
 }
 
 // SocksProxy manages SOCKS5 proxy connections
@@ -41,7 +41,7 @@ type SocksProxy struct {
 	LocalAddr   string
 	Listener    net.Listener
 	Active      bool
-	connections map[string]net.Conn // connID -> connection
+	connections map[string]net.Conn  // connID -> connection
 	connReady   map[string]chan bool // connID -> ready signal
 	connCount   int
 	mu          sync.Mutex
@@ -50,14 +50,16 @@ type SocksProxy struct {
 
 // SocksManager manages SOCKS5 proxies
 type SocksManager struct {
-	proxies map[string]*SocksProxy
-	mu      sync.RWMutex
+	proxies  map[string]*SocksProxy
+	mu       sync.RWMutex
+	bindAddr string
 }
 
 // NewSocksManager creates a new SOCKS manager
 func NewSocksManager() *SocksManager {
 	return &SocksManager{
-		proxies: make(map[string]*SocksProxy),
+		proxies:  make(map[string]*SocksProxy),
+		bindAddr: resolveBindAddr("GOTSL_SOCKS_BIND_ADDR"),
 	}
 }
 
@@ -70,7 +72,7 @@ func (sm *SocksManager) StartSocks(id, localPort string, sendFunc func(string)) 
 		return fmt.Errorf("SOCKS proxy %s already exists", id)
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:"+localPort)
+	listener, err := net.Listen("tcp", sm.bindAddr+":"+localPort)
 	if err != nil {
 		return fmt.Errorf("failed to listen on port %s: %w", localPort, err)
 	}
@@ -94,6 +96,11 @@ func (sm *SocksManager) StartSocks(id, localPort string, sendFunc func(string)) 
 	go sm.acceptConnections(proxy)
 
 	return nil
+}
+
+// BindAddr returns the bind address used for new SOCKS proxies.
+func (sm *SocksManager) BindAddr() string {
+	return sm.bindAddr
 }
 
 // acceptConnections accepts incoming SOCKS5 connections

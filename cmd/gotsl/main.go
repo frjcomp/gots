@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"flag"
 	"fmt"
@@ -9,8 +10,10 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/chzyer/readline"
@@ -41,6 +44,8 @@ func main() {
 	var networkInterface string
 	var logLevel string
 	var quiet bool
+	var headless bool
+	var controlAddr string
 
 	flag.BoolVar(&useSharedSecret, "s", false, "Enable shared secret authentication")
 	flag.BoolVar(&useSharedSecret, "shared-secret", false, "Enable shared secret authentication")
@@ -48,6 +53,8 @@ func main() {
 	flag.StringVar(&networkInterface, "interface", "", "Network interface to bind to (required, no default)")
 	flag.StringVar(&logLevel, "log-level", "", "Log level: error|warn|info|debug (default info)")
 	flag.BoolVar(&quiet, "quiet", false, "Reduce logs to errors only (overrides log-level)")
+	flag.BoolVar(&headless, "headless", false, "[SECURITY] Run without interactive shell and expose HTTP control API (disabled by default)")
+	flag.StringVar(&controlAddr, "control-addr", "127.0.0.1:0", "Headless control listen address (host:port, localhost only by default for security)")
 	flag.Parse()
 
 	// Initialize logging from env, then apply flags if provided
@@ -67,12 +74,12 @@ func main() {
 		log.Fatal("Error: --interface flag is required")
 	}
 
-	if err := runListener(port, networkInterface, useSharedSecret); err != nil {
+	if err := runListener(port, networkInterface, useSharedSecret, headless, controlAddr); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func runListener(port, networkInterface string, useSharedSecret bool) error {
+func runListener(port, networkInterface string, useSharedSecret, headless bool, controlAddr string) error {
 	printHeader()
 
 	// Load configuration with defaults and environment overrides
@@ -119,11 +126,34 @@ func runListener(port, networkInterface string, useSharedSecret bool) error {
 	defer netListener.Close()
 
 	log.Println("Listener ready. Waiting for connections...")
-	
+
+	if headless {
+		log.Println("⚠️  WARNING: Headless control API enabled - this exposes full system control over HTTP")
+		log.Println("⚠️  Ensure this endpoint is only accessible from trusted networks")
+		
+		hs, err := newHeadlessServer(listener, controlAddr)
+		if err != nil {
+			return err
+		}
+
+		// Allow Ctrl+C / SIGTERM to stop the headless server cleanly
+		sigCh := make(chan os.Signal, 1)
+		signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-sigCh
+			_ = hs.Stop(context.Background())
+		}()
+
+		hs.Start()
+		log.Printf("Headless control API listening on %s", hs.Addr())
+		<-hs.Wait()
+		return nil
+	}
+
 	// Redirect subsequent logs to avoid interfering with readline
 	logRedirector := newLogRedirector()
 	log.SetOutput(logRedirector)
-	
+
 	interactiveShell(listener, logRedirector)
 	return nil
 }
@@ -134,10 +164,10 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 		interactiveShellBasic(l)
 		return
 	}
-	
+
 	// Create completer for tab completion
 	completer := &shellCompleter{listener: l}
-	
+
 	rl, err := readline.NewEx(&readline.Config{
 		Prompt:          "\033[32mgotsl>\033[0m ",
 		HistoryFile:     "/tmp/.gotsl_history",
@@ -151,7 +181,7 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 		return
 	}
 	defer rl.Close()
-	
+
 	// Set readline instance for log redirector
 	logRedirector.setReadline(rl)
 
@@ -765,20 +795,20 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 	// Get the current line up to cursor position
 	lineStr := string(line[:pos])
 	parts := strings.Fields(lineStr)
-	
+
 	// List of all available commands
 	commands := []string{
 		"ls", "dir", "help", "shell", "upload", "download",
 		"forward", "forwards", "socks", "stop", "exit",
 	}
-	
+
 	// If we're at the start or only have partial first word, complete commands
 	if len(parts) == 0 || (len(parts) == 1 && !strings.HasSuffix(lineStr, " ")) {
 		prefix := ""
 		if len(parts) == 1 {
 			prefix = parts[0]
 		}
-		
+
 		var suggestions [][]rune
 		for _, cmd := range commands {
 			if strings.HasPrefix(cmd, prefix) {
@@ -787,13 +817,13 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 		}
 		return suggestions, len(prefix)
 	}
-	
+
 	// For commands that need client ID, complete with client numbers
 	if len(parts) >= 1 {
 		cmd := parts[0]
-		needsClientID := cmd == "shell" || cmd == "upload" || cmd == "download" || 
+		needsClientID := cmd == "shell" || cmd == "upload" || cmd == "download" ||
 			cmd == "forward" || cmd == "socks"
-		
+
 		if needsClientID && (len(parts) == 1 || (len(parts) == 2 && !strings.HasSuffix(lineStr, " "))) {
 			// Complete client IDs
 			clients := c.listener.GetClients()
@@ -802,7 +832,7 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 			if len(parts) == 2 {
 				prefix = parts[1]
 			}
-			
+
 			for i := range clients {
 				clientID := fmt.Sprintf("%d", i+1)
 				if strings.HasPrefix(clientID, prefix) {
@@ -811,7 +841,7 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 			}
 			return suggestions, len(prefix)
 		}
-		
+
 		// For "stop" command, complete with "forward" or "socks"
 		if cmd == "stop" && (len(parts) == 1 || (len(parts) == 2 && !strings.HasSuffix(lineStr, " "))) {
 			stopTargets := []string{"forward", "socks"}
@@ -819,7 +849,7 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 			if len(parts) == 2 {
 				prefix = parts[1]
 			}
-			
+
 			var suggestions [][]rune
 			for _, target := range stopTargets {
 				if strings.HasPrefix(target, prefix) {
@@ -829,7 +859,7 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 			return suggestions, len(prefix)
 		}
 	}
-	
+
 	return nil, 0
 }
 
@@ -855,13 +885,13 @@ func (lr *logRedirector) setReadline(rl *readline.Instance) {
 func (lr *logRedirector) Write(p []byte) (n int, err error) {
 	lr.mu.Lock()
 	defer lr.mu.Unlock()
-	
+
 	if lr.rl != nil {
 		// Use readline's output mechanism to print above the prompt
 		_, err = lr.rl.Stdout().Write(p)
 		return len(p), err
 	}
-	
+
 	// Fallback to os.Stderr if readline not initialized yet
 	return os.Stderr.Write(p)
 }
@@ -912,7 +942,8 @@ func handleForward(l server.ListenerInterface, clientAddr, localPort, remoteAddr
 			return
 		}
 
-		fmt.Printf("✓ Port forward started: 127.0.0.1:%s -> %s (via %s)\n", localPort, remoteAddr, clientAddr)
+		bindAddr := listener.GetForwardManager().BindAddr()
+		fmt.Printf("✓ Port forward started: %s:%s -> %s (via %s)\n", bindAddr, localPort, remoteAddr, clientAddr)
 		fmt.Printf("  Forward ID: %s\n", fwdID)
 	} else {
 		fmt.Println("Error: could not access forward manager")
@@ -970,9 +1001,10 @@ func handleSocks(l server.ListenerInterface, clientAddr, localPort string) {
 			return
 		}
 
-		fmt.Printf("✓ SOCKS5 proxy started on 127.0.0.1:%s (via %s)\n", localPort, clientAddr)
+		bindAddr := listener.GetSocksManager().BindAddr()
+		fmt.Printf("✓ SOCKS5 proxy started on %s:%s (via %s)\n", bindAddr, localPort, clientAddr)
 		fmt.Printf("  SOCKS ID: %s\n", socksID)
-		fmt.Printf("  Configure your browser/app to use SOCKS5 proxy at 127.0.0.1:%s\n", localPort)
+		fmt.Printf("  Configure your browser/app to use SOCKS5 proxy at %s:%s\n", bindAddr, localPort)
 	} else {
 		fmt.Println("Error: could not access SOCKS manager")
 	}

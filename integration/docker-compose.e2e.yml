@@ -1,0 +1,44 @@
+services:
+  gotsl:
+    build:
+      context: ..
+      dockerfile: Dockerfile.e2e
+      target: gotsl
+    command: ["--headless", "--control-addr", "0.0.0.0:8081", "--port", "8443", "--interface", "0.0.0.0", "--log-level", "error"]
+    environment:
+      GOTSL_FORWARD_BIND_ADDR: "0.0.0.0"
+      GOTSL_SOCKS_BIND_ADDR: "0.0.0.0"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  gotsr:
+    build:
+      context: ..
+      dockerfile: Dockerfile.e2e
+      target: gotsr
+    depends_on:
+      gotsl:
+        condition: service_healthy
+    command: ["--target", "gotsl:8443", "--retries", "5", "--log-level", "error"]
+
+  backend:
+    image: hashicorp/http-echo:0.2.3
+    command: ["-listen=:8080", "-text=hello-backend"]
+
+  tester:
+    build:
+      context: ..
+      dockerfile: Dockerfile.e2e
+      target: tester
+    depends_on:
+      - gotsl
+      - gotsr
+      - backend
+    environment:
+      HEADLESS_ENDPOINT: "http://gotsl:8081"
+    command: ["test", "./integration", "-run", "HeadlessE2E", "-count=1", "-v"]

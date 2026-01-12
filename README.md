@@ -99,6 +99,28 @@ listener> stop socks socks-1767774545221103600     # Stop a SOCKS5 proxy
 ```
 Configure your browser/app to use `127.0.0.1:1080` as SOCKS5 proxy.
 
+### Headless Mode with HTTP Control API
+
+**⚠️ SECURITY WARNING**: The headless mode exposes an HTTP API that provides **full system control** over the listener and connected clients. Only enable this in trusted environments.
+
+**Headless mode** allows programmatic control of gotsl via HTTP API without an interactive shell. This is useful for automation, testing, and integration with other tools.
+
+**Enable headless mode** (disabled by default):
+```bash
+./gotsl --headless --control-addr 127.0.0.1:8080 --port 9001 --interface 0.0.0.0
+```
+
+**Available endpoints**:
+- `GET /health` - Health check
+- `GET /clients` - List connected clients
+- `POST /command` - Execute command on client
+- `POST /upload` - Upload file to client
+- `POST /download` - Download file from client
+- `POST /forward` - Start port forward
+- `POST /socks` - Start SOCKS5 proxy
+
+See [docs/JOURNEYS.md](docs/JOURNEYS.md) for automated testing examples using the headless API. For detailed API endpoint documentation, see [docs/API.md](docs/API.md).
+
 
 ## Testing
 - Run unit and integration tests locally:

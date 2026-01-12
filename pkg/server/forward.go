@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"strings"
 	"sync"
 
 	"github.com/frjcomp/gots/pkg/logging"
@@ -27,12 +29,14 @@ type ForwardInfo struct {
 type ForwardManager struct {
 	forwards map[string]*ForwardInfo
 	mu       sync.RWMutex
+	bindAddr string
 }
 
 // NewForwardManager creates a new forward manager
 func NewForwardManager() *ForwardManager {
 	return &ForwardManager{
 		forwards: make(map[string]*ForwardInfo),
+		bindAddr: resolveBindAddr("GOTSL_FORWARD_BIND_ADDR"),
 	}
 }
 
@@ -45,7 +49,7 @@ func (fm *ForwardManager) StartForward(id, localPort, remoteAddr string, sendFun
 		return fmt.Errorf("forward %s already exists", id)
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:"+localPort)
+	listener, err := net.Listen("tcp", fm.bindAddr+":"+localPort)
 	if err != nil {
 		return fmt.Errorf("failed to listen on port %s: %w", localPort, err)
 	}
@@ -65,6 +69,11 @@ func (fm *ForwardManager) StartForward(id, localPort, remoteAddr string, sendFun
 	go fm.acceptConnections(info, sendFunc)
 
 	return nil
+}
+
+// BindAddr returns the bind address used for new forwards.
+func (fm *ForwardManager) BindAddr() string {
+	return fm.bindAddr
 }
 
 // acceptConnections accepts incoming connections and forwards them
@@ -198,6 +207,14 @@ func (fm *ForwardManager) StopForward(id string) error {
 
 	logging.Infof("[+] Stopped forward %s", id)
 	return nil
+}
+
+// resolveBindAddr returns a bind address from env or defaults to loopback for safety.
+func resolveBindAddr(envVar string) string {
+	if v := strings.TrimSpace(os.Getenv(envVar)); v != "" {
+		return v
+	}
+	return "127.0.0.1"
 }
 
 // ListForwards returns a list of active forwards

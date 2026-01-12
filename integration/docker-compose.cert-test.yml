@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  gotsl:
+    build:
+      context: ..
+      dockerfile: Dockerfile.e2e
+      target: gotsl
+    command: ["--headless", "--control-addr", "0.0.0.0:8081", "--port", "8443", "--interface", "0.0.0.0", "--log-level", "debug"]
+    environment:
+      GOTSL_FORWARD_BIND_ADDR: "0.0.0.0"
+      GOTSL_SOCKS_BIND_ADDR: "0.0.0.0"
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8081/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Client with correct certificate validation (default TLS, no pinning)
+  gotsr-valid-cert:
+    build:
+      context: ..
+      dockerfile: Dockerfile.e2e
+      target: gotsr
+    depends_on:
+      gotsl:
+        condition: service_healthy
+    # Uses default TLS validation without certificate pinning - should succeed
+    command: ["--target", "gotsl:8443", "--retries", "5", "--log-level", "debug"]
+    environment:
+      GOTS_CLIENT_ID: "valid-cert-client"
+
+  # Client with invalid certificate fingerprint (should fail to connect)
+  gotsr-invalid-cert:
+    build:
+      context: ..
+      dockerfile: Dockerfile.e2e
+      target: gotsr
+    depends_on:
+      gotsl:
+        condition: service_healthy
+    # Wrong fingerprint - TLS handshake should fail immediately
+    command: ["--target", "gotsl:8443", "--cert-fingerprint", "0000000000000000000000000000000000000000000000000000000000000000", "--retries", "1", "--log-level", "debug"]
+    environment:
+      GOTS_CLIENT_ID: "invalid-cert-client"
+    restart: "no"
+
+  backend:
+    image: hashicorp/http-echo:0.2.3
+    command: ["-listen=:8080", "-text=response-from-backend"]
+
+  tester:
+    build:
+      context: ..
+      dockerfile: Dockerfile.e2e
+      target: tester
+    depends_on:
+      - gotsl
+      - gotsr-valid-cert
+    environment:
+      HEADLESS_ENDPOINT: "http://gotsl:8081"
+      JOURNEY_PATH: "integration/journeys/cert-verification.yaml"
+    command: ["test", "./integration", "-run", "HeadlessE2E", "-count=1", "-v"]

@@ -1,0 +1,26 @@
+FROM golang:1.25 AS builder
+WORKDIR /src
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# Build static binaries for the listener and client
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/gotsl ./cmd/gotsl
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o /out/gotsr ./cmd/gotsr
+
+FROM debian:bookworm-slim AS gotsl
+RUN apt-get update && apt-get install -y ca-certificates wget && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/gotsl /usr/local/bin/gotsl
+ENTRYPOINT ["/usr/local/bin/gotsl"]
+
+FROM debian:bookworm-slim AS gotsr
+RUN apt-get update && apt-get install -y ca-certificates curl wget && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /out/gotsr /usr/local/bin/gotsr
+ENTRYPOINT ["/usr/local/bin/gotsr"]
+
+FROM golang:1.25 AS tester
+WORKDIR /src
+COPY . .
+ENTRYPOINT ["go"]

@@ -323,6 +323,12 @@ func validateAssertion(t *testing.T, assertion Assertion, actual string) {
 		passed = strings.Contains(actual, assertion.Expected)
 	case "contains_ci":
 		passed = strings.Contains(strings.ToLower(actual), strings.ToLower(assertion.Expected))
+	case "not_contains":
+		passed = !strings.Contains(actual, assertion.Expected)
+		if !passed {
+			t.Fatalf("Assertion failed: %s\n  Type: %s\n  Should NOT contain: %q\n  But output contains it: %q",
+				assertion.Description, assertion.Type, assertion.Expected, actual)
+		}
 	case "equals":
 		passed = strings.TrimSpace(actual) == strings.TrimSpace(assertion.Expected)
 	case "equals_ci":
