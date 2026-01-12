@@ -98,14 +98,21 @@ func runListener(port, networkInterface string, useSharedSecret, headless bool, 
 
 	var secret string
 	if cfg.SharedSecretAuth {
-		secret, err = certs.GenerateSecret()
-		if err != nil {
-			return fmt.Errorf("failed to generate shared secret: %w", err)
+		// Use provided secret if set, otherwise generate random one
+		if cfg.SharedSecret != "" {
+			secret = cfg.SharedSecret
+			log.Printf("✓ Shared secret authentication enabled (using provided secret)")
+		} else {
+			var err error
+			secret, err = certs.GenerateSecret()
+			if err != nil {
+				return fmt.Errorf("failed to generate shared secret: %w", err)
+			}
+			log.Printf("✓ Shared secret authentication enabled")
+			log.Printf("Secret (hex): %s", secret)
+			log.Printf("\nTo connect, use:")
+			log.Printf("  gotsr -s %s --cert-fingerprint %s %s:%s <max-retries>\n", secret, fingerprint, cfg.NetworkInterface, cfg.Port)
 		}
-		log.Printf("✓ Shared secret authentication enabled")
-		log.Printf("Secret (hex): %s", secret)
-		log.Printf("\nTo connect, use:")
-		log.Printf("  gotsr -s %s --cert-fingerprint %s %s:%s <max-retries>\n", secret, fingerprint, cfg.NetworkInterface, cfg.Port)
 	}
 
 	log.Printf("Version: %s (commit %s, date %s)", version.Version, version.Commit, version.Date)

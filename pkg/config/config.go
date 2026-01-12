@@ -22,6 +22,7 @@ type ServerConfig struct {
 	DownloadTimeout    time.Duration `yaml:"download_timeout" json:"download_timeout"`
 	PingInterval       time.Duration `yaml:"ping_interval" json:"ping_interval"`
 	SharedSecretAuth   bool          `yaml:"shared_secret_auth" json:"shared_secret_auth"`
+	SharedSecret       string        `yaml:"shared_secret" json:"shared_secret"`
 }
 
 // ClientConfig holds configuration for the gotsr client.
