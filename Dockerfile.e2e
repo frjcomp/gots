@@ -16,7 +16,7 @@ COPY --from=builder /out/gotsl /usr/local/bin/gotsl
 ENTRYPOINT ["/usr/local/bin/gotsl"]
 
 FROM debian:bookworm-slim AS gotsr
-RUN apt-get update && apt-get install -y ca-certificates curl wget && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates curl wget jq && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /out/gotsr /usr/local/bin/gotsr
 ENTRYPOINT ["/usr/local/bin/gotsr"]
 

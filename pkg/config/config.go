@@ -217,6 +217,12 @@ func applyServerConfigEnv(cfg *ServerConfig) error {
 			}
 			return nil
 		},
+		"GOTS_SHARED_SECRET": func(v string) error {
+			if v != "" {
+				cfg.SharedSecret = v
+			}
+			return nil
+		},
 	}
 
 	for envVar, apply := range envMap {
