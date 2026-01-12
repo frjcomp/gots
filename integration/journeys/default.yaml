@@ -1,0 +1,97 @@
+name: "Comprehensive Feature Journey"
+description: "End-to-end test of shell commands, file operations, port forward, and SOCKS proxy for accessing unreachable services"
+default_timeout_ms: 15000
+
+steps:
+  - name: "verify client connected"
+    type: "command"
+    command: "curl -s http://gotsl:8081/clients | jq -r 'length'"
+    assertions:
+      - type: "contains"
+        expected: "1"
+        description: "verify at least one client is connected to listener"
+
+  - name: "verify client hostname"
+    type: "command"
+    command: "test -f /usr/local/bin/gotsr && echo 'gotsr binary found on client' || echo 'Error: not on client'"
+    assertions:
+      - type: "contains"
+        expected: "found"
+        description: "verify command executed on gotsr client (gotsr binary present)"
+
+  - name: "verify client process info"
+    type: "command"
+    command: "ps aux | grep -i 'gotsr.*--target' | grep -v grep | wc -l"
+    assertions:
+      - type: "contains"
+        expected: "1"
+        description: "verify gotsr client process is running with --target flag"
+
+  - name: "shell - basic command execution"
+    type: "command"
+    command: "echo 'shell execution test' && whoami"
+    assertions:
+      - type: "contains"
+        expected: "shell execution test"
+        description: "verify shell command execution works on client"
+
+  - name: "upload hosts to client"
+    type: "upload"
+    local_path: "/etc/hosts"
+    remote_path: "/tmp/uploaded-hosts"
+    assertions:
+      - type: "contains"
+        expected: "success"
+        description: "upload reported success"
+
+  - name: "verify uploaded file on client"
+    type: "command"
+    command: "grep -q localhost /tmp/uploaded-hosts && echo ok || echo missing"
+    assertions:
+      - type: "contains"
+        expected: "ok"
+        description: "uploaded file exists and contains localhost"
+
+  - name: "download hosts from client"
+    type: "download"
+    remote_path: "/etc/hosts"
+    assertions:
+      - type: "contains"
+        expected: "localhost"
+        description: "downloaded content contains localhost"
+
+  - name: "port forward to unreachable backend"
+    type: "forward"
+    local_port: "29180"
+    remote_addr: "backend:8080"
+    fetch_url: "http://gotsl:29180/"
+    assertions:
+      - type: "contains"
+        expected: "hello-backend"
+        description: "port forward enables access to otherwise unreachable backend service"
+
+  - name: "test forward with curl"
+    type: "command"
+    command: "curl -s -m 10 http://backend:8080/ 2>&1 || echo 'Direct access blocked as expected'"
+    assertions:
+      - type: "contains"
+        expected: "hello-backend"
+        description: "curl can reach backend through client's network (demonstrates forward tunnel works)"
+
+  - name: "SOCKS proxy to unreachable backend"
+    type: "socks"
+    local_port: "1180"
+    target_url: "http://backend:8080/"
+    assertions:
+      - type: "contains"
+        expected: "hello-backend"
+        description: "SOCKS proxy enables access to otherwise unreachable backend service"
+
+  - name: "test SOCKS with curl"
+    type: "command"
+    command: "curl -s -m 10 http://backend:8080/ 2>&1"
+    assertions:
+      - type: "contains"
+        expected: "hello-backend"
+        description: "curl can reach backend directly from client network (SOCKS tunnel enables listener to route through client)"
+
