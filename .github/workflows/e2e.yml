@@ -3,22 +3,9 @@ name: Headless E2E
 on:
   push:
     branches: [ main ]
-    paths:
-      - "cmd/**"
-      - "pkg/**"
-      - "integration/**"
-      - "Dockerfile.e2e"
-      - "integration/docker-compose.e2e.yml"
-      - ".github/workflows/e2e.yml"
   workflow_dispatch: {}
   pull_request:
-    paths:
-      - "cmd/**"
-      - "pkg/**"
-      - "integration/**"
-      - "Dockerfile.e2e"
-      - "integration/docker-compose.e2e.yml"
-      - ".github/workflows/e2e.yml"
+    branches: [ main ]
 
 jobs:
   linux-e2e:
