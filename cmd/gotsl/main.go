@@ -194,14 +194,26 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 
 	printHelp()
 
+	ctrlCCount := 0
 	for {
 		line, err := rl.Readline()
 		if err != nil {
-			if err == readline.ErrInterrupt || err == io.EOF {
+			if err == readline.ErrInterrupt {
+				ctrlCCount++
+				if ctrlCCount == 1 {
+					fmt.Println("\nPress Ctrl+C again to exit, or type a command to continue")
+					continue
+				}
+				return
+			}
+			if err == io.EOF {
 				return
 			}
 			return
 		}
+
+		// Reset Ctrl+C counter on successful input
+		ctrlCCount = 0
 
 		input := strings.TrimSpace(line)
 		if input == "" {
