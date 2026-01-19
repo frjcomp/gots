@@ -647,36 +647,54 @@ func TestPtyShellExitSequenceOrder(t *testing.T) {
 	t.Log("✓ PTY shell exit sequence verified - goroutines exit before terminal cleanup")
 }
 
-// TestReadlineRefreshAfterPtyExit documents the need for readline refresh after PTY mode.
+// TestReadlineRefreshAfterPtyExit documents the terminal reset requirement after PTY mode.
 // This test prevents regression of the keyboard freeze bug that occurs after multiple PTY
 // shell exits, particularly when switching between Linux and Windows clients.
 //
-// The bug: After exiting PTY mode, the terminal state is restored but the readline instance
-// isn't refreshed. This causes readline to become desynchronized with the terminal settings,
-// leading to a frozen keyboard at the gotsl> prompt.
+// THE PROBLEM:
+// After exiting PTY mode (especially from Windows shells), the terminal state can be 
+// severely corrupted. Simple rl.Refresh() is insufficient. Terminal modes, escape sequences,
+// and readline's internal state all need aggressive cleanup.
 //
-// The fix: Call rl.Refresh() after returning from enterPtyShell() to resynchronize readline's
-// internal state with the restored terminal.
+// THE FIX:
+// Call resetReadlineAfterPty(rl) after returning from enterPtyShell() which performs:
+// 1. Drain stdin of pending data
+// 2. Clear stdin read deadlines
+// 3. Explicitly restore terminal state (force cooked mode)
+// 4. Send comprehensive ANSI reset sequences (DECSTR, cursor, disable modes)
+// 5. Call rl.Refresh() to redraw
+// 6. Brief sleep for terminal to process
 //
-// Why this is a documentation test:
-// - readline requires a real TTY which isn't available in automated tests
-// - The freeze happens due to internal readline state that's not easily mockable
-// - Testing this requires manual verification with multiple shell switches
+// WHY NO AUTOMATED TESTS:
+// - Requires real TTY (not available in CI/automated tests)
+// - Bug manifests as readline refusing to accept keyboard input - no programmatic way to detect
+// - Needs actual PTY sessions with real Windows/Linux clients
+// - Terminal state corruption is platform-specific and timing-dependent
+// - readline's internal state is opaque and not mockable
 //
-// Manual test procedure:
-// 1. Start gotsl and connect to multiple clients (Linux and Windows)
-// 2. Run: shell 1 (enter Linux shell)
-// 3. Type some commands, then exit
-// 4. Verify: gotsl> prompt is responsive
-// 5. Run: shell 2 (enter Windows shell)
-// 6. Type some commands, then exit
-// 7. Verify: gotsl> prompt is still responsive (this was the bug)
-// 8. Repeat steps 2-7 multiple times
-// 9. Verify: keyboard never freezes at gotsl> prompt
+// MANUAL TEST PROCEDURE (CRITICAL - RUN THIS BEFORE RELEASES):
+// 1. Start gotsl on a real terminal: gotsl --port 8443 --interface 0.0.0.0
+// 2. Connect Linux client: shell 1
+// 3. Run commands (ls, pwd, etc), then: exit
+// 4. VERIFY: Can type at gotsl> prompt (not frozen)
+// 5. Connect Windows client: shell 2
+// 6. Run commands (dir, cd, etc), then: exit
+// 7. VERIFY: Can type at gotsl> prompt (THIS IS THE CRITICAL TEST)
+// 8. Switch back to Linux: shell 1, run commands, exit
+// 9. VERIFY: Still responsive
+// 10. Switch to Windows again: shell 2, run commands, exit
+// 11. VERIFY: Still responsive (test multiple times)
+// 12. Try Ctrl+L at any point if keyboard seems stuck - should recover
 //
-// Location of fix: cmd/gotsl/main.go in interactiveShell() function
-// After: enterPtyShell(l, clientAddr)
-// Add:   rl.Refresh()
+// If keyboard freezes at step 7 or 11, the resetReadlineAfterPty() function is broken.
+//
+// Location of fix: cmd/gotsl/main.go
+// - In interactiveShell() after enterPtyShell(): resetReadlineAfterPty(rl)
+// - Function resetReadlineAfterPty() contains the aggressive cleanup logic
+//
+// IMPORTANCE: This bug makes the tool unusable. It MUST be manually tested before release.
 func TestReadlineRefreshAfterPtyExit(t *testing.T) {
-	t.Log("✓ Readline refresh requirement documented - must call rl.Refresh() after PTY exit")
+	t.Log("✓ Terminal reset requirement documented - MUST manually test with real Windows/Linux PTY switches")
+	t.Log("  See test comments for detailed manual testing procedure")
+	t.Log("  WARNING: No automated tests exist for this critical bug - manual testing is REQUIRED")
 }
