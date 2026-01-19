@@ -189,6 +189,20 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 	}
 	defer rl.Close()
 
+	// Set up Ctrl+L handler for clearing screen and refreshing readline state
+	// This provides a recovery mechanism if keyboard input gets stuck
+	rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
+		// Intercept Ctrl+L (0x0C) to refresh terminal and readline state
+		if r == 12 { // Ctrl+L
+			// Clear screen using ANSI escape sequence
+			fmt.Print("\033[H\033[2J")
+			// Refresh readline to resynchronize with terminal state
+			rl.Refresh()
+			return 0, false // Don't process this character
+		}
+		return r, true
+	}
+
 	// Set readline instance for log redirector
 	logRedirector.setReadline(rl)
 
@@ -444,6 +458,9 @@ func printHelp() {
 	fmt.Println("  stop forward <id>           - Stop a port forward by ID")
 	fmt.Println("  stop socks <id>             - Stop a SOCKS5 proxy by ID")
 	fmt.Println("  exit                        - Exit the listener")
+	fmt.Println()
+	fmt.Println("Keyboard shortcuts:")
+	fmt.Println("  Ctrl-L                      - Clear screen and refresh input (use if keyboard is stuck)")
 	fmt.Println()
 	fmt.Println("In PTY shell mode:")
 	fmt.Println("  Ctrl-D                      - Return to listener prompt")
