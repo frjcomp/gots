@@ -49,6 +49,9 @@ func (m *mockHeadlessListener) IsInPtyMode(clientAddr string) bool              
 func (m *mockHeadlessListener) GetPtyDataChan(clientAddr string) (chan []byte, bool) {
 	return nil, false
 }
+func (m *mockHeadlessListener) IsAnyPtyModeActive() bool {
+	return false
+}
 func (m *mockHeadlessListener) GetForwardManager() forwardManager {
 	return m.fm
 }

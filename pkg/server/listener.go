@@ -100,7 +100,10 @@ func (l *Listener) acceptConnections(listener net.Listener) {
 // handleClient handles a single client connection
 func (l *Listener) handleClient(conn net.Conn) {
 	clientAddr := conn.RemoteAddr().String()
-	log.Printf("\n[+] New client connected: %s", clientAddr)
+	// Only log client connection if no PTY session is active to avoid disrupting interactive shells
+	if !l.IsAnyPtyModeActive() {
+		log.Printf("\n[+] New client connected: %s", clientAddr)
+	}
 	defer conn.Close()
 
 	reader := bufio.NewReaderSize(conn, protocol.BufferSize1MB)
@@ -622,6 +625,18 @@ func (l *Listener) GetPtyDataChan(clientAddr string) (chan []byte, bool) {
 	defer l.mutex.Unlock()
 	ch, exists := l.clientPtyData[clientAddr]
 	return ch, exists
+}
+
+// IsAnyPtyModeActive checks if any client is currently in PTY mode
+func (l *Listener) IsAnyPtyModeActive() bool {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	for _, inPty := range l.clientPtyMode {
+		if inPty {
+			return true
+		}
+	}
+	return false
 }
 
 // GetForwardManager returns the forward manager

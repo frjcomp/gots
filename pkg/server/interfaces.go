@@ -45,6 +45,9 @@ type ListenerInterface interface {
 
 	// GetPtyDataChan retrieves the data channel for a client in PTY mode.
 	GetPtyDataChan(clientAddr string) (chan []byte, bool)
+
+	// IsAnyPtyModeActive checks if any client is currently in PTY mode.
+	IsAnyPtyModeActive() bool
 }
 
 // CommandHandler defines the interface for handling command execution on clients.

@@ -649,37 +649,6 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 		fmt.Printf("Warning: Could not set raw mode: %v\n", err)
 		// Continue anyway
 	}
-	defer func() {
-		// Clear any read deadlines on stdin
-		os.Stdin.SetReadDeadline(time.Time{})
-
-		// Restore terminal state BEFORE disabling features
-		// This ensures the terminal is in cooked mode when we send the disable sequences
-		if oldState != nil {
-			term.Restore(fd, oldState)
-		}
-
-		// Now disable terminal features that may have been enabled by the remote PTY
-		// Send these in cooked mode so the terminal processes them correctly
-		// - Disable mouse tracking (all modes)
-		// - Disable focus events
-		// - Reset bracketed paste mode
-		os.Stdout.WriteString("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1004l")
-		os.Stdout.Sync()
-
-		// Flush stdin only if it's a real terminal (not a pipe/test)
-		// This consumes any pending input like terminal response escape sequences
-		if term.IsTerminal(fd) {
-			drainPendingInput(os.Stdin)
-			// Also flush using platform-specific method if available
-			if err := flushStdin(); err != nil {
-				log.Printf("Warning: failed to flush stdin after PTY exit: %v", err)
-			}
-		}
-
-		// Force a newline to reset the terminal display
-		fmt.Println()
-	}()
 
 	// Channel to signal we should exit (closed channel broadcasts to all goroutines)
 	exitPty := make(chan struct{})
@@ -791,12 +760,43 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 	_ = os.Stdin.SetReadDeadline(time.Now())
 
 	// Exit PTY mode (sending PTY_EXIT but not waiting for response - client might have already exited)
-	fmt.Println("\nExiting PTY shell... (Press Enter to return to prompt)")
+	fmt.Println("\nExiting PTY shell...")
 	_ = l.SendCommand(clientAddr, protocol.CmdPtyExit)
 	l.ExitPtyMode(clientAddr)
 
 	// Wait for both goroutines to fully finish before returning
 	wg.Wait()
+
+	// NOW restore terminal state after all goroutines are done
+	// Clear any read deadlines on stdin
+	os.Stdin.SetReadDeadline(time.Time{})
+
+	// Restore terminal state BEFORE disabling features
+	// This ensures the terminal is in cooked mode when we send the disable sequences
+	if oldState != nil {
+		term.Restore(fd, oldState)
+	}
+
+	// Now disable terminal features that may have been enabled by the remote PTY
+	// Send these in cooked mode so the terminal processes them correctly
+	// - Disable mouse tracking (all modes)
+	// - Disable focus events
+	// - Reset bracketed paste mode
+	os.Stdout.WriteString("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1004l")
+	os.Stdout.Sync()
+
+	// Flush stdin only if it's a real terminal (not a pipe/test)
+	// This consumes any pending input like terminal response escape sequences
+	if term.IsTerminal(fd) {
+		drainPendingInput(os.Stdin)
+		// Also flush using platform-specific method if available
+		if err := flushStdin(); err != nil {
+			log.Printf("Warning: failed to flush stdin after PTY exit: %v", err)
+		}
+	}
+
+	// Force a newline to reset the terminal display
+	fmt.Println()
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.
