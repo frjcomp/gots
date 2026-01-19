@@ -172,44 +172,53 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 		return
 	}
 
-	// Create completer for tab completion
-	completer := &shellCompleter{listener: l}
+	// Use a pointer to track if we need to recreate readline
+	var rl *readline.Instance
+	var needsReinitialize bool = true
+	var ctrlCCount int = 0
 
-	rl, err := readline.NewEx(&readline.Config{
-		Prompt:          "\033[32mgotsl>\033[0m ",
-		HistoryFile:     "/tmp/.gotsl_history",
-		AutoComplete:    completer,
-		InterruptPrompt: "^C",
-		EOFPrompt:       "exit",
-	})
-	if err != nil {
-		log.Printf("Warning: readline initialization failed, using basic input: %v", err)
-		interactiveShellBasic(l)
-		return
-	}
-	defer rl.Close()
-
-	// Set up Ctrl+L handler for clearing screen and refreshing readline state
-	// This provides a recovery mechanism if keyboard input gets stuck
-	rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
-		// Intercept Ctrl+L (0x0C) to refresh terminal and readline state
-		if r == 12 { // Ctrl+L
-			// Clear screen using ANSI escape sequence
-			fmt.Print("\033[H\033[2J")
-			// Refresh readline to resynchronize with terminal state
-			rl.Refresh()
-			return 0, false // Don't process this character
-		}
-		return r, true
-	}
-
-	// Set readline instance for log redirector
-	logRedirector.setReadline(rl)
-
-	printHelp()
-
-	ctrlCCount := 0
 	for {
+		// Recreate readline if needed (e.g., after PTY exit corrupts state)
+		if needsReinitialize {
+			if rl != nil {
+				rl.Close()
+			}
+
+			completer := &shellCompleter{listener: l}
+			var err error
+			rl, err = readline.NewEx(&readline.Config{
+				Prompt:          "\033[32mgotsl>\033[0m ",
+				HistoryFile:     "/tmp/.gotsl_history",
+				AutoComplete:    completer,
+				InterruptPrompt: "^C",
+				EOFPrompt:       "exit",
+			})
+			if err != nil {
+				log.Printf("Warning: readline initialization failed, using basic input: %v", err)
+				interactiveShellBasic(l)
+				return
+			}
+
+			// Set readline instance for log redirector
+			logRedirector.setReadline(rl)
+
+			// Set up Ctrl+L handler for clearing screen and refreshing readline state
+			rl.Config.FuncFilterInputRune = func(r rune) (rune, bool) {
+				// Intercept Ctrl+L (0x0C) to refresh terminal and readline state
+				if r == 12 { // Ctrl+L
+					// Clear screen using ANSI escape sequence
+					fmt.Print("\033[H\033[2J")
+					// Refresh readline to resynchronize with terminal state
+					rl.Refresh()
+					return 0, false // Don't process this character
+				}
+				return r, true
+			}
+
+			printHelp()
+			needsReinitialize = false
+		}
+
 		line, err := rl.Readline()
 		if err != nil {
 			if err == readline.ErrInterrupt {
@@ -218,11 +227,14 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 					fmt.Println("\nPress Ctrl+C again to exit, or type a command to continue")
 					continue
 				}
+				rl.Close()
 				return
 			}
 			if err == io.EOF {
+				rl.Close()
 				return
 			}
+			rl.Close()
 			return
 		}
 
@@ -252,9 +264,9 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 				continue
 			}
 			enterPtyShell(l, clientAddr)
-			// After exiting PTY mode, aggressively reset readline and terminal state
-			// This is critical for Windows shells which can corrupt terminal state
-			resetReadlineAfterPty(rl)
+			// After PTY exit, signal that we need to recreate readline
+			// This cleanly recovers from any terminal state corruption
+			needsReinitialize = true
 		case "upload":
 			if len(parts) != 4 {
 				fmt.Println("Usage: upload <client_id> <local_path> <remote_path>")
@@ -817,66 +829,6 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 
 	// Force a newline to reset the terminal display
 	fmt.Println()
-}
-
-// resetReadlineAfterPty performs aggressive cleanup of readline and terminal state
-// after exiting PTY mode. This is critical for preventing keyboard freeze, especially
-// after exiting Windows shells which can corrupt terminal state more severely.
-//
-// Platform compatibility:
-// - Linux: Full support with ANSI sequences and ioctl flush
-// - macOS: Full support with ANSI sequences and TIOCFLUSH
-// - Windows: ANSI sequences supported on Windows 10+ with modern terminals (Windows Terminal, ConEmu)
-//           No ioctl flush available, but not needed as gotsl typically runs on Unix hosts
-//
-// Note: This function is designed to recover from terminal state corruption caused by
-// remote PTY sessions (running on any OS), not limited by the OS gotsl itself runs on.
-func resetReadlineAfterPty(rl *readline.Instance) {
-	if rl == nil {
-		return
-	}
-
-	fd := int(os.Stdin.Fd())
-	
-	// 1. Ensure stdin has no pending data that could confuse readline
-	drainPendingInput(os.Stdin)
-	
-	// 2. Clear any read deadlines
-	os.Stdin.SetReadDeadline(time.Time{})
-	
-	// 3. Get current terminal state and restore it explicitly
-	// This ensures we're in cooked mode (not raw mode)
-	// Works on Linux, macOS, and Windows 10+ with ConPTY
-	if term.IsTerminal(fd) {
-		// Get the current state
-		state, err := term.GetState(fd)
-		if err == nil {
-			// Restore it (this forces a reset to current settings)
-			term.Restore(fd, state)
-		}
-	}
-	
-	// 4. Send comprehensive terminal reset sequence
-	// These ANSI/DEC sequences work on:
-	// - All modern Unix terminals (xterm, gnome-terminal, iTerm2, etc.)
-	// - Windows 10+ with VT100 emulation enabled (default in Windows Terminal)
-	// - May be ignored by older Windows Console, but won't cause harm
-	os.Stdout.WriteString(
-		"\x1b[!p" + // Soft terminal reset (DECSTR)
-		"\x1b[?25h" + // Show cursor
-		"\x1b[?1000l\x1b[?1002l\x1b[?1003l" + // Disable mouse tracking
-		"\x1b[?1006l\x1b[?1015l" + // Disable extended mouse modes
-		"\x1b[?2004l" + // Disable bracketed paste
-		"\x1b[?1004l", // Disable focus events
-	)
-	os.Stdout.Sync()
-	
-	// 5. Force readline to refresh its internal state and redraw
-	rl.Refresh()
-	
-	// 6. Give terminal a moment to process the reset sequences
-	// This brief delay ensures terminal has time to fully process all escape sequences
-	time.Sleep(10 * time.Millisecond)
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.
