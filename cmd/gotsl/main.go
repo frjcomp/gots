@@ -137,7 +137,7 @@ func runListener(port, networkInterface string, useSharedSecret, headless bool, 
 	if headless {
 		log.Println("⚠️  WARNING: Headless control API enabled - this exposes full system control over HTTP")
 		log.Println("⚠️  Ensure this endpoint is only accessible from trusted networks")
-		
+
 		hs, err := newHeadlessServer(listener, controlAddr)
 		if err != nil {
 			return err
@@ -176,6 +176,12 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 	var rl *readline.Instance
 	var needsReinitialize bool = true
 	var ctrlCCount int = 0
+	var ttyFile *os.File // Fresh /dev/tty handle to avoid stale stdin state
+	defer func() {
+		if ttyFile != nil {
+			ttyFile.Close()
+		}
+	}()
 
 	for {
 		// Recreate readline if needed (e.g., after PTY exit corrupts state)
@@ -183,18 +189,34 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 			if rl != nil {
 				rl.Close()
 			}
+			if ttyFile != nil {
+				ttyFile.Close()
+				ttyFile = nil
+			}
 
-			completer := &shellCompleter{listener: l}
-			var err error
-			rl, err = readline.NewEx(&readline.Config{
+			// Open a fresh TTY handle to avoid reusing a potentially stale stdin FD
+			// after returning from PTY mode. If /dev/tty is unavailable (e.g., Windows
+			// host or rare container setup), fall back to the process stdio.
+			cfg := &readline.Config{
 				Prompt:          "\033[32mgotsl>\033[0m ",
 				HistoryFile:     "/tmp/.gotsl_history",
-				AutoComplete:    completer,
+				AutoComplete:    &shellCompleter{listener: l},
 				InterruptPrompt: "^C",
 				EOFPrompt:       "exit",
-			})
+			}
+			if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+				ttyFile = f
+				cfg.Stdin = f
+				cfg.Stdout = f
+			}
+
+			var err error
+			rl, err = readline.NewEx(cfg)
 			if err != nil {
 				log.Printf("Warning: readline initialization failed, using basic input: %v", err)
+				if ttyFile != nil {
+					ttyFile.Close()
+				}
 				interactiveShellBasic(l)
 				return
 			}
