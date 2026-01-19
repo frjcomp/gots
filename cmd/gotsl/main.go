@@ -822,6 +822,15 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 // resetReadlineAfterPty performs aggressive cleanup of readline and terminal state
 // after exiting PTY mode. This is critical for preventing keyboard freeze, especially
 // after exiting Windows shells which can corrupt terminal state more severely.
+//
+// Platform compatibility:
+// - Linux: Full support with ANSI sequences and ioctl flush
+// - macOS: Full support with ANSI sequences and TIOCFLUSH
+// - Windows: ANSI sequences supported on Windows 10+ with modern terminals (Windows Terminal, ConEmu)
+//           No ioctl flush available, but not needed as gotsl typically runs on Unix hosts
+//
+// Note: This function is designed to recover from terminal state corruption caused by
+// remote PTY sessions (running on any OS), not limited by the OS gotsl itself runs on.
 func resetReadlineAfterPty(rl *readline.Instance) {
 	if rl == nil {
 		return
@@ -837,6 +846,7 @@ func resetReadlineAfterPty(rl *readline.Instance) {
 	
 	// 3. Get current terminal state and restore it explicitly
 	// This ensures we're in cooked mode (not raw mode)
+	// Works on Linux, macOS, and Windows 10+ with ConPTY
 	if term.IsTerminal(fd) {
 		// Get the current state
 		state, err := term.GetState(fd)
@@ -847,7 +857,10 @@ func resetReadlineAfterPty(rl *readline.Instance) {
 	}
 	
 	// 4. Send comprehensive terminal reset sequence
-	// This clears any terminal state that might have been set by remote shell
+	// These ANSI/DEC sequences work on:
+	// - All modern Unix terminals (xterm, gnome-terminal, iTerm2, etc.)
+	// - Windows 10+ with VT100 emulation enabled (default in Windows Terminal)
+	// - May be ignored by older Windows Console, but won't cause harm
 	os.Stdout.WriteString(
 		"\x1b[!p" + // Soft terminal reset (DECSTR)
 		"\x1b[?25h" + // Show cursor
@@ -862,6 +875,7 @@ func resetReadlineAfterPty(rl *readline.Instance) {
 	rl.Refresh()
 	
 	// 6. Give terminal a moment to process the reset sequences
+	// This brief delay ensures terminal has time to fully process all escape sequences
 	time.Sleep(10 * time.Millisecond)
 }
 

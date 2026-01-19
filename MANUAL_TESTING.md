@@ -8,7 +8,17 @@ These tests cannot be automated due to technical limitations (TTY requirements, 
 **Issue**: Keyboard input freezes after exiting PTY shells, especially Windows shells  
 **Impact**: Makes the tool completely unusable  
 **Frequency**: Occurs often when switching between Windows and Linux shells  
-**Related Code**: `cmd/gotsl/main.go` - `resetReadlineAfterPty()` function
+**Related Code**: `cmd/gotsl/main.go` - `resetReadlineAfterPty()` function  
+**Platform Support**: Works on Linux, macOS, and Windows 10+ with modern terminals
+
+### Platform-Specific Notes
+
+- **Linux**: Full support with all ANSI sequences and ioctl stdin flush
+- **macOS**: Full support with all ANSI sequences and TIOCFLUSH stdin flush  
+- **Windows 10+**: Requires modern terminal (Windows Terminal, ConEmu) with VT100 support
+  - Legacy cmd.exe may not process all escape sequences correctly
+  - Recommend using Windows Terminal for best compatibility
+  - stdin flush is no-op but not needed (handled by drainPendingInput)
 
 ### Test Procedure
 
