@@ -238,6 +238,8 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 				continue
 			}
 			enterPtyShell(l, clientAddr)
+			// After exiting PTY mode, refresh readline to ensure it's in sync with terminal state
+			rl.Refresh()
 		case "upload":
 			if len(parts) != 4 {
 				fmt.Println("Usage: upload <client_id> <local_path> <remote_path>")
