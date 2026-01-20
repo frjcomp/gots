@@ -226,6 +226,7 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, 
 				ttyFile = f
 				cfg.Stdin = f
 				cfg.Stdout = f
+				cfg.Stderr = f
 			}
 
 			var err error
@@ -311,6 +312,15 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, 
 			enterPtyShell(l, clientAddr, arbiter, nil)
 			// After PTY exit, signal that we need to recreate readline
 			// This cleanly recovers from any terminal state corruption
+
+			// Explicitly restore terminal to normal (cooked) mode after PTY raw mode.
+			// This ensures readline can properly reinitialize on the next loop.
+			if arbiter != nil {
+				// Even though arbiter.EnterShell() was called in enterPtyShell(),
+				// we may need additional time for the terminal to fully recover.
+				time.Sleep(50 * time.Millisecond)
+			}
+
 			needsReinitialize = true
 		case "upload":
 			if len(parts) != 4 {
@@ -809,6 +819,11 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 	_ = os.Stdin.SetReadDeadline(time.Time{})
 	// Flush any pending input on stdin to clear buffered data from PTY session
 	_ = flushStdin()
+
+	// Give the terminal a moment to fully reset after raw mode is disabled.
+	// This is especially important when connecting to Windows shells which may
+	// have different line ending or buffering behavior.
+	time.Sleep(100 * time.Millisecond)
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.
