@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -46,11 +47,11 @@ type PtySessionConfig struct {
 
 // SessionArbiter owns the local TTY and arbitrates exclusive access between shell and PTY modes.
 type SessionArbiter struct {
-	mu       sync.Mutex
-	state    Mode
-	tty      *os.File
-	cooked   *term.State
-	hasTTY   bool
+	mu     sync.Mutex
+	state  Mode
+	tty    *os.File
+	cooked *term.State
+	hasTTY bool
 
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
@@ -61,14 +62,28 @@ type SessionArbiter struct {
 
 // NewSessionArbiter opens /dev/tty (falling back to stdin/stdout) and prepares to arbitrate.
 func NewSessionArbiter(logf func(string, ...interface{})) (*SessionArbiter, error) {
-	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
-	if err != nil {
-		// Fallback: use stdin if /dev/tty unavailable (tests, headless).
+	// Check if stdin is a terminal first
+	stdinIsTTY := term.IsTerminal(int(os.Stdin.Fd()))
+	
+	var tty *os.File
+	var hasTTY bool
+	
+	// Only try to use /dev/tty if stdin is also a terminal
+	// This ensures we read from the same source the process is receiving input from
+	if stdinIsTTY {
+		var err error
+		tty, err = os.OpenFile("/dev/tty", os.O_RDWR, 0)
+		if err != nil {
+			// Fallback: use stdin if /dev/tty unavailable
+			tty = os.Stdin
+		}
+		hasTTY = term.IsTerminal(int(tty.Fd()))
+	} else {
+		// stdin is not a terminal (pipe/redirect), so use it directly
 		tty = os.Stdin
+		hasTTY = false
 	}
-
-	// Only consider it a real TTY if /dev/tty succeeded or stdin is actually a terminal
-	hasTTY := term.IsTerminal(int(tty.Fd()))
+	
 	var cooked *term.State
 	if hasTTY {
 		st, terr := term.GetState(int(tty.Fd()))
@@ -156,7 +171,7 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	inputErr := make(chan error, 1)
 	outputErr := make(chan error, 1)
 
-	if !a.hasTTY || cfg.DisableLocalIO {
+	if cfg.DisableLocalIO {
 		// Headless/test mode: drop incoming data and wait for cancellation.
 		a.wg.Add(1)
 		go func() {
@@ -170,8 +185,8 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 				}
 			}
 		}()
-	} else {
-		// Read pump: TTY -> Send
+	} else if a.hasTTY {
+		// Real TTY: read with deadlines
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
@@ -207,36 +222,111 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 				}
 			}
 		}()
-
-		// Write pump: Incoming -> TTY
+	} else {
+		// Non-TTY (like pipe/file): read without deadlines but non-blocking
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
+			// Try to set non-blocking mode for pipes
+			_ = syscall.SetNonblock(int(a.tty.Fd()), true)
+			buf := make([]byte, 4096)
 			for {
+				n, err := a.tty.Read(buf)
+				if n > 0 {
+					a.markHeartbeat()
+					if serr := cfg.Send(buf[:n]); serr != nil {
+						inputErr <- serr
+						return
+					}
+				}
+				if err != nil {
+					// Ignore EAGAIN/EWOULDBLOCK errors from non-blocking reads
+					if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
+						// No data available, continue reading
+					} else {
+						inputErr <- err
+						return
+					}
+				}
+				// If no data was read, yield to avoid busy-waiting
 				select {
 				case <-pctx.Done():
 					return
-				case data, ok := <-cfg.Incoming:
-					if !ok {
-						// Channel closed by remote - print message and exit
-						if a.hasTTY {
-							a.tty.Write([]byte("\r\n[Remote shell exited]\r\n"))
-						}
-						outputErr <- io.EOF
-						return
-					}
-					if len(data) == 0 {
-						continue
-					}
-					if len(cfg.Incoming) > backpressureLimit {
-						outputErr <- fmt.Errorf("backpressure: incoming queue exceeded limit %d", backpressureLimit)
-						return
-					}
+				case <-time.After(1 * time.Millisecond):
+				}
+			}
+		}()
+	}
+
+	// Write pump: Incoming -> TTY (always needed, regardless of TTY status)
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		for {
+			select {
+			case <-pctx.Done():
+				return
+			case data, ok := <-cfg.Incoming:
+				if !ok {
+					// Channel closed by remote - print message and exit
+					// Write to stdout (not stdin/tty) to ensure it's captured
+					fmt.Fprintf(os.Stdout, "\r\n[Remote shell exited]\r\n")
+					outputErr <- io.EOF
+					return
+				}
+				if len(data) == 0 {
+					continue
+				}
+				if len(cfg.Incoming) > backpressureLimit {
+					outputErr <- fmt.Errorf("backpressure: incoming queue exceeded limit %d", backpressureLimit)
+					return
+				}
+				a.markHeartbeat()
+				if _, err := a.tty.Write(data); err != nil {
+					outputErr <- err
+					return
+				}
+			}
+		}
+	}()
+
+	if !a.hasTTY || cfg.DisableLocalIO {
+		// Skip TTY-specific read pump for headless/non-TTY modes
+		// (TTY read pump or non-TTY read pump already started above)
+	} else {
+		// TTY read pump with deadlines
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			buf := make([]byte, 4096)
+			for {
+				if readDeadline > 0 {
+					_ = a.tty.SetReadDeadline(time.Now().Add(readDeadline))
+				}
+				n, err := a.tty.Read(buf)
+				if n > 0 {
 					a.markHeartbeat()
-					if _, err := a.tty.Write(data); err != nil {
-						outputErr <- err
+					if serr := cfg.Send(buf[:n]); serr != nil {
+						inputErr <- serr
 						return
 					}
+				}
+				if err != nil {
+					if isTimeout(err) {
+						select {
+						case <-pctx.Done():
+							return
+						default:
+							continue
+						}
+					}
+					inputErr <- err
+					return
+				}
+				select {
+				case <-pctx.Done():
+					return
+				default:
 				}
 			}
 		}()

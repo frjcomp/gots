@@ -304,6 +304,11 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, 
 			if clientAddr == "" {
 				continue
 			}
+			// Close readline before entering PTY so arbiter can read from stdin
+			if rl != nil {
+				rl.Close()
+				rl = nil
+			}
 			enterPtyShell(l, clientAddr, arbiter)
 			// After PTY exit, signal that we need to recreate readline
 			// This cleanly recovers from any terminal state corruption
@@ -720,12 +725,26 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	exitSent := false
+	var exitMu sync.Mutex
 
 	sendFn := func(data []byte) error {
 		// Check for Ctrl-D which signals exit
 		for _, b := range data {
 			if b == 0x04 {
-				cancel()
+				exitMu.Lock()
+				if exitSent {
+					exitMu.Unlock()
+					return nil
+				}
+				exitSent = true
+				exitMu.Unlock()
+				// Send exit command and close the channel
+				// The write pump will see the closed channel and print "[Remote shell exited]"
+				// Then it will send io.EOF to outputErr, causing RunPtySession to return
+				_ = l.SendCommand(clientAddr, protocol.CmdPtyExit)
+				l.ExitPtyMode(clientAddr)
+				// Return success - let the write pump print the message
 				return nil
 			}
 		}
@@ -750,8 +769,10 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 	}
 
 	err = arbiter.RunPtySession(ctx, cfg)
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
-		fmt.Printf("PTY session ended: %v\n", err)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
+			fmt.Printf("PTY session ended with error: %v\n", err)
+		}
 	}
 
 	l.ExitPtyMode(clientAddr)
