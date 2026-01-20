@@ -2,6 +2,8 @@ package main
 
 import (
 	"errors"
+	"io"
+	"log"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +45,14 @@ func (f *fakeClient) Close() error { f.closed++; return nil }
 func (f *fakeClient) IsConnected() bool { return true }
 
 func noSleep(time.Duration) {}
+
+// suppress suppresses log output during noisy retry test loops.
+func suppress() func() {
+	orig := log.Writer()
+	log.SetOutput(io.Discard)
+	return func() { log.SetOutput(orig) }
+}
+
 
 func TestRunClientArgValidation(t *testing.T) {
 	// Test with empty target should fail validation
@@ -125,6 +135,7 @@ func TestConnectWithRetry_ReconnectAfterHandleCommandsError(t *testing.T) {
 }
 
 func TestConnectWithRetrySuccessful(t *testing.T) {
+	defer suppress()()
 	fc := &fakeClient{} // No errors
 	created := 0
 	factory := func(target, secret, fingerprint string) client.ReverseClientInterface {
@@ -152,6 +163,7 @@ func TestConnectWithRetrySuccessful(t *testing.T) {
 }
 
 func TestConnectWithRetryInfiniteRetries(t *testing.T) {
+	defer suppress()()
 	// Test with maxRetries=0 (infinite)
 	fc := &fakeClient{connectErrs: []error{errors.New("fail"), errors.New("fail")}}
 	var mu sync.Mutex
@@ -183,6 +195,7 @@ func TestConnectWithRetryInfiniteRetries(t *testing.T) {
 }
 
 func TestConnectWithRetryBackoffMaximum(t *testing.T) {
+	defer suppress()()
 	// Test that backoff caps at 5 minutes
 	fc := &fakeClient{connectErrs: []error{
 		errors.New("fail1"),
@@ -217,6 +230,7 @@ func TestConnectWithRetryBackoffMaximum(t *testing.T) {
 }
 
 func TestConnectWithRetryHandleCommandsSuccess(t *testing.T) {
+	defer suppress()()
 	// Test successful connection and command handling with eventual failure
 	fc := &fakeClient{
 		connectErrs: []error{nil, nil},
@@ -289,6 +303,7 @@ func TestRunClientWithInvalidSecret(t *testing.T) {
 }
 
 func TestRunClientValidConfig(t *testing.T) {
+	defer suppress()()
 	// Create a client that connects and handles commands successfully, then exits
 	fc := &fakeClient{
 		connectErrs: []error{nil},
@@ -320,6 +335,7 @@ func TestRunClientValidConfig(t *testing.T) {
 }
 
 func TestConnectWithRetryNilSleepFunction(t *testing.T) {
+	defer suppress()()
 	// Test that nil sleep function defaults to time.Sleep (won't actually sleep in test)
 	fc := &fakeClient{connectErrs: []error{errors.New("fail")}}
 	factory := func(target, secret, fingerprint string) client.ReverseClientInterface {
@@ -342,9 +358,10 @@ func TestConnectWithRetryNilSleepFunction(t *testing.T) {
 }
 
 func TestConnectWithRetrySuccessfulFirstAttempt(t *testing.T) {
+	defer suppress()()
 	fc := &fakeClient{
 		connectErrs: []error{nil},
-		handleErrs:  []error{errors.New("disconnect")},
+		handleErrs:  []error{errors.New("disconnect"), errors.New("disconnect")},
 	}
 	factory := func(target, secret, fingerprint string) client.ReverseClientInterface {
 		return fc
@@ -375,6 +392,7 @@ func TestConnectWithRetrySuccessfulFirstAttempt(t *testing.T) {
 }
 
 func TestConnectWithRetryBackoffMaximumCapping(t *testing.T) {
+	defer suppress()()
 	// Test that backoff doesn't exceed 5 minutes
 	fc := &fakeClient{
 		connectErrs: []error{
@@ -427,6 +445,7 @@ func TestConnectWithRetryBackoffMaximumCapping(t *testing.T) {
 }
 
 func TestConnectWithRetryWithAuthentication(t *testing.T) {
+	defer suppress()()
 	fc := &fakeClient{
 		connectErrs: []error{nil},
 		handleErrs:  []error{errors.New("disconnect")},
