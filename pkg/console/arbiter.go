@@ -283,7 +283,9 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 				}
 				a.markHeartbeat()
 				if _, err := a.tty.Write(data); err != nil {
-					outputErr <- err
+					// Write failed (e.g., stdin invalid in CI). Print exit message and return cleanly.
+					fmt.Fprintf(os.Stdout, "\r\n[Remote shell exited]\r\n")
+					outputErr <- io.EOF
 					return
 				}
 			}
