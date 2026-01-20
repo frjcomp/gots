@@ -283,8 +283,11 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 				}
 				a.markHeartbeat()
 				if _, err := a.tty.Write(data); err != nil {
-					// Write failed (e.g., stdin invalid in CI). Print exit message and return cleanly.
-					fmt.Fprintf(os.Stdout, "\r\n[Remote shell exited]\r\n")
+					// Write failed (e.g., stdin invalid in CI/headless mode).
+					// Only print message if we have a real TTY (interactive user).
+					if a.hasTTY {
+						fmt.Fprintf(os.Stdout, "\r\n[Remote shell exited]\r\n")
+					}
 					outputErr <- io.EOF
 					return
 				}
