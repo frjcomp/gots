@@ -380,28 +380,28 @@ func buildBinary(t *testing.T, name, pkg string) string {
 	if runtime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(out), ".exe") {
 		out += ".exe"
 	}
-		buildTarget := pkg
-		if strings.HasPrefix(pkg, "./") {
-			buildTarget = "github.com/frjcomp/gots" + strings.TrimPrefix(pkg, ".")
-		}
-		cmd := exec.Command("go", "build", "-o", out, buildTarget)
-		var buf bytes.Buffer
-		cmd.Stdout = &buf
-		cmd.Stderr = &buf
-		if err := cmd.Run(); err != nil {
-			t.Fatalf("build %s failed: %v; output: %s", name, err, buf.String())
-		}
-		return out
+	buildTarget := pkg
+	if strings.HasPrefix(pkg, "./") {
+		buildTarget = "github.com/frjcomp/gots" + strings.TrimPrefix(pkg, ".")
 	}
+	cmd := exec.Command("go", "build", "-o", out, buildTarget)
+	var buf bytes.Buffer
+	cmd.Stdout = &buf
+	cmd.Stderr = &buf
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("build %s failed: %v; output: %s", name, err, buf.String())
+	}
+	return out
+}
 
 func currentUser(t *testing.T) string {
-		t.Helper()
-		out, err := exec.Command("whoami").Output()
-		if err != nil {
-			t.Fatalf("whoami failed: %v", err)
-		}
-		return strings.TrimSpace(string(out))
+	t.Helper()
+	out, err := exec.Command("whoami").Output()
+	if err != nil {
+		t.Fatalf("whoami failed: %v", err)
 	}
+	return strings.TrimSpace(string(out))
+}
 
 func mustReadFile(t *testing.T, path string) []byte {
 	t.Helper()

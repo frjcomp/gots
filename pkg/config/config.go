@@ -11,34 +11,34 @@ import (
 
 // ServerConfig holds configuration for the gotsl listener.
 type ServerConfig struct {
-	Port               string        `yaml:"port" json:"port"`
-	NetworkInterface   string        `yaml:"network_interface" json:"network_interface"`
-	BufferSize         int           `yaml:"buffer_size" json:"buffer_size"`
-	MaxBufferSize      int           `yaml:"max_buffer_size" json:"max_buffer_size"`
-	ChunkSize          int           `yaml:"chunk_size" json:"chunk_size"`
-	ReadTimeout        time.Duration `yaml:"read_timeout" json:"read_timeout"`
-	ResponseTimeout    time.Duration `yaml:"response_timeout" json:"response_timeout"`
-	CommandTimeout     time.Duration `yaml:"command_timeout" json:"command_timeout"`
-	DownloadTimeout    time.Duration `yaml:"download_timeout" json:"download_timeout"`
-	PingInterval       time.Duration `yaml:"ping_interval" json:"ping_interval"`
-	SharedSecretAuth   bool          `yaml:"shared_secret_auth" json:"shared_secret_auth"`
-	SharedSecret       string        `yaml:"shared_secret" json:"shared_secret"`
+	Port             string        `yaml:"port" json:"port"`
+	NetworkInterface string        `yaml:"network_interface" json:"network_interface"`
+	BufferSize       int           `yaml:"buffer_size" json:"buffer_size"`
+	MaxBufferSize    int           `yaml:"max_buffer_size" json:"max_buffer_size"`
+	ChunkSize        int           `yaml:"chunk_size" json:"chunk_size"`
+	ReadTimeout      time.Duration `yaml:"read_timeout" json:"read_timeout"`
+	ResponseTimeout  time.Duration `yaml:"response_timeout" json:"response_timeout"`
+	CommandTimeout   time.Duration `yaml:"command_timeout" json:"command_timeout"`
+	DownloadTimeout  time.Duration `yaml:"download_timeout" json:"download_timeout"`
+	PingInterval     time.Duration `yaml:"ping_interval" json:"ping_interval"`
+	SharedSecretAuth bool          `yaml:"shared_secret_auth" json:"shared_secret_auth"`
+	SharedSecret     string        `yaml:"shared_secret" json:"shared_secret"`
 }
 
 // ClientConfig holds configuration for the gotsr client.
 type ClientConfig struct {
-	Target             string        `yaml:"target" json:"target"`
-	MaxRetries         int           `yaml:"max_retries" json:"max_retries"`
-	BufferSize         int           `yaml:"buffer_size" json:"buffer_size"`
-	MaxBufferSize      int           `yaml:"max_buffer_size" json:"max_buffer_size"`
-	ChunkSize          int           `yaml:"chunk_size" json:"chunk_size"`
-	ReadTimeout        time.Duration `yaml:"read_timeout" json:"read_timeout"`
-	ResponseTimeout    time.Duration `yaml:"response_timeout" json:"response_timeout"`
-	CommandTimeout     time.Duration `yaml:"command_timeout" json:"command_timeout"`
-	DownloadTimeout    time.Duration `yaml:"download_timeout" json:"download_timeout"`
-	PingInterval       time.Duration `yaml:"ping_interval" json:"ping_interval"`
-	SharedSecret       string        `yaml:"shared_secret" json:"shared_secret"`
-	CertFingerprint    string        `yaml:"cert_fingerprint" json:"cert_fingerprint"`
+	Target          string        `yaml:"target" json:"target"`
+	MaxRetries      int           `yaml:"max_retries" json:"max_retries"`
+	BufferSize      int           `yaml:"buffer_size" json:"buffer_size"`
+	MaxBufferSize   int           `yaml:"max_buffer_size" json:"max_buffer_size"`
+	ChunkSize       int           `yaml:"chunk_size" json:"chunk_size"`
+	ReadTimeout     time.Duration `yaml:"read_timeout" json:"read_timeout"`
+	ResponseTimeout time.Duration `yaml:"response_timeout" json:"response_timeout"`
+	CommandTimeout  time.Duration `yaml:"command_timeout" json:"command_timeout"`
+	DownloadTimeout time.Duration `yaml:"download_timeout" json:"download_timeout"`
+	PingInterval    time.Duration `yaml:"ping_interval" json:"ping_interval"`
+	SharedSecret    string        `yaml:"shared_secret" json:"shared_secret"`
+	CertFingerprint string        `yaml:"cert_fingerprint" json:"cert_fingerprint"`
 }
 
 // DefaultServerConfig returns server configuration with sensible defaults.
@@ -47,9 +47,9 @@ func DefaultServerConfig() *ServerConfig {
 	return &ServerConfig{
 		Port:             "9001",
 		NetworkInterface: "0.0.0.0",
-		BufferSize:       1024 * 1024,                  // 1MB
-		MaxBufferSize:    10 * 1024 * 1024,             // 10MB
-		ChunkSize:        65536,                        // 64KB
+		BufferSize:       1024 * 1024,      // 1MB
+		MaxBufferSize:    10 * 1024 * 1024, // 10MB
+		ChunkSize:        65536,            // 64KB
 		ReadTimeout:      1 * time.Second,
 		ResponseTimeout:  5 * time.Second,
 		CommandTimeout:   120 * time.Second,
@@ -63,9 +63,9 @@ func DefaultServerConfig() *ServerConfig {
 func DefaultClientConfig() *ClientConfig {
 	return &ClientConfig{
 		MaxRetries:      5,
-		BufferSize:      1024 * 1024,                  // 1MB
-		MaxBufferSize:   10 * 1024 * 1024,             // 10MB
-		ChunkSize:       65536,                        // 64KB
+		BufferSize:      1024 * 1024,      // 1MB
+		MaxBufferSize:   10 * 1024 * 1024, // 10MB
+		ChunkSize:       65536,            // 64KB
 		ReadTimeout:     1 * time.Second,
 		ResponseTimeout: 5 * time.Second,
 		CommandTimeout:  120 * time.Second,

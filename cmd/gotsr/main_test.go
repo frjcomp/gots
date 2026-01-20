@@ -53,7 +53,6 @@ func suppress() func() {
 	return func() { log.SetOutput(orig) }
 }
 
-
 func TestRunClientArgValidation(t *testing.T) {
 	// Test with empty target should fail validation
 	_, err := config.LoadClientConfig("", 0, "", "")
@@ -88,7 +87,10 @@ func TestConnectWithRetry_MaxRetriesReachedOnConnectFailures(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() { connectWithRetry("127.0.0.1:8443", 3, "", "", factory, noSleep, 100*time.Millisecond); close(done) }()
+	go func() {
+		connectWithRetry("127.0.0.1:8443", 3, "", "", factory, noSleep, 100*time.Millisecond)
+		close(done)
+	}()
 
 	select {
 	case <-done:
@@ -114,7 +116,10 @@ func TestConnectWithRetry_ReconnectAfterHandleCommandsError(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() { connectWithRetry("127.0.0.1:8443", 2, "", "", factory, noSleep, 100*time.Millisecond); close(done) }()
+	go func() {
+		connectWithRetry("127.0.0.1:8443", 2, "", "", factory, noSleep, 100*time.Millisecond)
+		close(done)
+	}()
 
 	select {
 	case <-done:
@@ -309,7 +314,7 @@ func TestRunClientValidConfig(t *testing.T) {
 		connectErrs: []error{nil},
 		handleErrs:  []error{errors.New("exit")}, // Will cause retry and hit maxRetries
 	}
-	
+
 	originalNewClient := func(target, secret, fingerprint string) client.ReverseClientInterface {
 		return fc
 	}

@@ -309,7 +309,7 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, 
 				rl.Close()
 				rl = nil
 			}
-			enterPtyShell(l, clientAddr, arbiter)
+			enterPtyShell(l, clientAddr, arbiter, nil)
 			// After PTY exit, signal that we need to recreate readline
 			// This cleanly recovers from any terminal state corruption
 			needsReinitialize = true
@@ -394,23 +394,28 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, 
 
 // interactiveShellBasic is a fallback when readline is not available
 func interactiveShellBasic(l server.ListenerInterface, arbiter *console.SessionArbiter) {
-	reader := bufio.NewReader(os.Stdin)
-
 	printHelp()
 
+	scanner := bufio.NewScanner(os.Stdin)
+
 	for {
+		// Print prompt directly to stdout (unbuffered)
 		fmt.Print("gotsl> ")
-		line, err := reader.ReadString('\n')
-		if err != nil {
+		// Sync stdout to ensure prompt is visible, but don't fail on pipes/files
+		_ = os.Stdout.Sync()
+		_ = os.Stderr.Sync()
+
+		// Scan input line
+		if !scanner.Scan() {
 			return
 		}
 
-		input := strings.TrimSpace(line)
-		if input == "" {
+		line := scanner.Text()
+		if line == "" {
 			continue
 		}
 
-		parts := strings.Fields(input)
+		parts := strings.Fields(line)
 		command := parts[0]
 
 		switch command {
@@ -427,7 +432,7 @@ func interactiveShellBasic(l server.ListenerInterface, arbiter *console.SessionA
 			if clientAddr == "" {
 				continue
 			}
-			enterPtyShell(l, clientAddr, arbiter)
+			enterPtyShell(l, clientAddr, arbiter, nil)
 		case "upload":
 			if len(parts) != 4 {
 				fmt.Println("Usage: upload <client_id> <local_path> <remote_path>")
@@ -689,7 +694,7 @@ func handleDownloadGlobal(l server.ListenerInterface, currentClient, remotePath,
 	return true
 }
 
-func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *console.SessionArbiter) {
+func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *console.SessionArbiter, bufferedData []byte) {
 	fmt.Printf("Entering PTY shell with %s...\n", clientAddr)
 
 	if err := l.SendCommand(clientAddr, protocol.CmdPtyMode); err != nil {
@@ -768,6 +773,13 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 		BackpressureLimit: cap(ptyDataChan) + 64,
 	}
 
+	// Process any buffered data from the reader that was created before entering PTY mode
+	if len(bufferedData) > 0 {
+		if err := sendFn(bufferedData); err != nil {
+			fmt.Printf("Error sending buffered PTY data: %v\n", err)
+		}
+	}
+
 	err = arbiter.RunPtySession(ctx, cfg)
 	if err != nil {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
@@ -776,8 +788,11 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 	}
 
 	l.ExitPtyMode(clientAddr)
-	_ = arbiter.EnterShell()
-	fmt.Println("gotsl> ")
+	if err := arbiter.EnterShell(); err != nil {
+		fmt.Printf("Warning: failed to restore shell mode: %v\n", err)
+	}
+	// Clear any read deadlines set by PTY session (best effort - may not be supported on all file types)
+	_ = os.Stdin.SetReadDeadline(time.Time{})
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.

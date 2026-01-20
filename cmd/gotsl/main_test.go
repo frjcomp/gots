@@ -570,6 +570,7 @@ func TestDrainPendingInputStopsAfterDraining(t *testing.T) {
 		t.Fatalf("expected SetReadDeadline to be called at least twice, got %d", m.setCalls)
 	}
 }
+
 // TestInteractiveShellCtrlCBehavior documents the expected behavior of double Ctrl+C exit protection.
 // The interactiveShell function requires two consecutive Ctrl+C presses to exit:
 // - First Ctrl+C: increments ctrlCCount to 1, displays confirmation message
@@ -599,7 +600,7 @@ func TestInteractiveShellCtrlCBehavior(t *testing.T) {
 // TestPtyShellExitSequenceOrder verifies that terminal cleanup happens after goroutines exit.
 // This test prevents regression of the keyboard freeze bug where goroutines were still running
 // while terminal state was being restored, causing input to remain frozen after exiting PTY mode.
-// 
+//
 // The fix ensures:
 // 1. PTY exit signal closes the exitPty channel
 // 2. All goroutines (stdin reader and output forwarder) exit cleanly
@@ -615,15 +616,15 @@ func TestInteractiveShellCtrlCBehavior(t *testing.T) {
 func TestPtyShellExitSequenceOrder(t *testing.T) {
 	// This test documents the critical sequence for PTY shell cleanup.
 	// We verify the key aspects programmatically where possible.
-	
+
 	// Create a mock listener
 	ml := &mockListener{
 		clients: []string{"127.0.0.1:8000"},
 	}
-	
+
 	// Verify mockListener implements the interface and has required methods
 	var _ server.ListenerInterface = ml
-	
+
 	// The actual exit sequence in enterPtyShell is:
 	// 1. <-exitPty                                    (wait for exit signal)
 	// 2. os.Stdin.SetReadDeadline(time.Now())         (unblock stdin read)
@@ -639,11 +640,11 @@ func TestPtyShellExitSequenceOrder(t *testing.T) {
 	// Step 5 (wg.Wait()) is CRITICAL - it ensures goroutines exit BEFORE terminal restoration.
 	// If this was in a defer (earlier bug), goroutines could still be running when
 	// terminal state was restored, causing keyboard freeze on Windows.
-	
+
 	if ml == nil {
 		t.Fatal("mockListener should be initialized")
 	}
-	
+
 	t.Log("✓ PTY shell exit sequence verified - goroutines exit before terminal cleanup")
 }
 
@@ -652,7 +653,7 @@ func TestPtyShellExitSequenceOrder(t *testing.T) {
 // shell exits, particularly when switching between Linux and Windows clients.
 //
 // THE PROBLEM:
-// After exiting PTY mode (especially from Windows shells), the terminal state can be 
+// After exiting PTY mode (especially from Windows shells), the terminal state can be
 // severely corrupted. Simple rl.Refresh() is insufficient. Terminal modes, escape sequences,
 // and readline's internal state all need aggressive cleanup.
 //

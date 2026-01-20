@@ -294,27 +294,27 @@ func TestClientConfigEnvOverrides(t *testing.T) {
 
 func TestConfigEnvInvalidValues(t *testing.T) {
 	tests := []struct {
-		name   string
-		envVar string
-		value  string
+		name     string
+		envVar   string
+		value    string
 		isServer bool
 	}{
 		{
-			name:   "invalid buffer size",
-			envVar: "GOTS_BUFFER_SIZE",
-			value:  "not-a-number",
+			name:     "invalid buffer size",
+			envVar:   "GOTS_BUFFER_SIZE",
+			value:    "not-a-number",
 			isServer: true,
 		},
 		{
-			name:   "invalid max retries",
-			envVar: "GOTS_MAX_RETRIES",
-			value:  "not-a-number",
+			name:     "invalid max retries",
+			envVar:   "GOTS_MAX_RETRIES",
+			value:    "not-a-number",
 			isServer: false,
 		},
 		{
-			name:   "invalid timeout",
-			envVar: "GOTS_READ_TIMEOUT",
-			value:  "invalid-duration",
+			name:     "invalid timeout",
+			envVar:   "GOTS_READ_TIMEOUT",
+			value:    "invalid-duration",
 			isServer: true,
 		},
 	}
@@ -380,15 +380,15 @@ func TestServerConfigValidateEmptyNetworkInterface(t *testing.T) {
 
 func TestServerConfigValidateInvalidBufferSize(t *testing.T) {
 	cfg := &ServerConfig{
-		Port:              "9001",
-		NetworkInterface:  "0.0.0.0",
-		BufferSize:        0,
-		MaxBufferSize:     10 * 1024 * 1024,
-		ChunkSize:         65536,
-		ReadTimeout:       1 * time.Second,
-		ResponseTimeout:   5 * time.Second,
-		CommandTimeout:    120 * time.Second,
-		PingInterval:      30 * time.Second,
+		Port:             "9001",
+		NetworkInterface: "0.0.0.0",
+		BufferSize:       0,
+		MaxBufferSize:    10 * 1024 * 1024,
+		ChunkSize:        65536,
+		ReadTimeout:      1 * time.Second,
+		ResponseTimeout:  5 * time.Second,
+		CommandTimeout:   120 * time.Second,
+		PingInterval:     30 * time.Second,
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for invalid buffer size")
@@ -397,15 +397,15 @@ func TestServerConfigValidateInvalidBufferSize(t *testing.T) {
 
 func TestServerConfigValidateMaxBufferSmaller(t *testing.T) {
 	cfg := &ServerConfig{
-		Port:              "9001",
-		NetworkInterface:  "0.0.0.0",
-		BufferSize:        10 * 1024 * 1024,
-		MaxBufferSize:     1 * 1024 * 1024, // smaller than buffer size
-		ChunkSize:         65536,
-		ReadTimeout:       1 * time.Second,
-		ResponseTimeout:   5 * time.Second,
-		CommandTimeout:    120 * time.Second,
-		PingInterval:      30 * time.Second,
+		Port:             "9001",
+		NetworkInterface: "0.0.0.0",
+		BufferSize:       10 * 1024 * 1024,
+		MaxBufferSize:    1 * 1024 * 1024, // smaller than buffer size
+		ChunkSize:        65536,
+		ReadTimeout:      1 * time.Second,
+		ResponseTimeout:  5 * time.Second,
+		CommandTimeout:   120 * time.Second,
+		PingInterval:     30 * time.Second,
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error when max_buffer_size < buffer_size")
@@ -414,15 +414,15 @@ func TestServerConfigValidateMaxBufferSmaller(t *testing.T) {
 
 func TestServerConfigValidateInvalidChunkSize(t *testing.T) {
 	cfg := &ServerConfig{
-		Port:              "9001",
-		NetworkInterface:  "0.0.0.0",
-		BufferSize:        1 * 1024 * 1024,
-		MaxBufferSize:     10 * 1024 * 1024,
-		ChunkSize:         0, // invalid
-		ReadTimeout:       1 * time.Second,
-		ResponseTimeout:   5 * time.Second,
-		CommandTimeout:    120 * time.Second,
-		PingInterval:      30 * time.Second,
+		Port:             "9001",
+		NetworkInterface: "0.0.0.0",
+		BufferSize:       1 * 1024 * 1024,
+		MaxBufferSize:    10 * 1024 * 1024,
+		ChunkSize:        0, // invalid
+		ReadTimeout:      1 * time.Second,
+		ResponseTimeout:  5 * time.Second,
+		CommandTimeout:   120 * time.Second,
+		PingInterval:     30 * time.Second,
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Error("expected error for invalid chunk size")
@@ -463,15 +463,15 @@ func TestServerConfigValidateInvalidTimeouts(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &ServerConfig{
-				Port:              "9001",
-				NetworkInterface:  "0.0.0.0",
-				BufferSize:        1 * 1024 * 1024,
-				MaxBufferSize:     10 * 1024 * 1024,
-				ChunkSize:         65536,
-				ReadTimeout:       1 * time.Second,
-				ResponseTimeout:   5 * time.Second,
-				CommandTimeout:    120 * time.Second,
-				PingInterval:      30 * time.Second,
+				Port:             "9001",
+				NetworkInterface: "0.0.0.0",
+				BufferSize:       1 * 1024 * 1024,
+				MaxBufferSize:    10 * 1024 * 1024,
+				ChunkSize:        65536,
+				ReadTimeout:      1 * time.Second,
+				ResponseTimeout:  5 * time.Second,
+				CommandTimeout:   120 * time.Second,
+				PingInterval:     30 * time.Second,
 			}
 			tt.setup(cfg)
 			if err := cfg.Validate(); err == nil {
@@ -510,16 +510,16 @@ func TestClientConfigValidateInvalidSecret(t *testing.T) {
 
 func TestClientConfigValidateValidSecret(t *testing.T) {
 	cfg := &ClientConfig{
-		Target:       "localhost:9001",
-		MaxRetries:   5,
-		SharedSecret: "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
-		BufferSize:   1 * 1024 * 1024,
-		MaxBufferSize: 10 * 1024 * 1024,
-		ChunkSize:    65536,
-		ReadTimeout:  1 * time.Second,
+		Target:          "localhost:9001",
+		MaxRetries:      5,
+		SharedSecret:    "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+		BufferSize:      1 * 1024 * 1024,
+		MaxBufferSize:   10 * 1024 * 1024,
+		ChunkSize:       65536,
+		ReadTimeout:     1 * time.Second,
 		ResponseTimeout: 5 * time.Second,
-		CommandTimeout: 120 * time.Second,
-		PingInterval: 30 * time.Second,
+		CommandTimeout:  120 * time.Second,
+		PingInterval:    30 * time.Second,
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("expected valid config with proper secret, got error: %v", err)

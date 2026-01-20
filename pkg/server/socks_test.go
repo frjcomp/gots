@@ -128,26 +128,26 @@ func TestHandleSocksDataWritesToLocalConn(t *testing.T) {
 
 func TestSocksManager_StartSocks(t *testing.T) {
 	sm := NewSocksManager()
-	
+
 	sendCalls := []string{}
 	sendFunc := func(msg string) {
 		sendCalls = append(sendCalls, msg)
 	}
-	
+
 	err := sm.StartSocks("test1", "0", sendFunc)
 	if err != nil {
 		t.Fatalf("StartSocks failed: %v", err)
 	}
-	
+
 	proxies := sm.ListSocks()
 	if len(proxies) != 1 {
 		t.Errorf("Expected 1 SOCKS proxy, got %d", len(proxies))
 	}
-	
+
 	if proxies[0].ID != "test1" {
 		t.Errorf("Expected ID 'test1', got %s", proxies[0].ID)
 	}
-	
+
 	// Should have sent SOCKS_START command
 	if len(sendCalls) == 0 {
 		t.Error("Expected SOCKS_START to be sent")
@@ -156,19 +156,19 @@ func TestSocksManager_StartSocks(t *testing.T) {
 
 func TestSocksManager_StopSocks(t *testing.T) {
 	sm := NewSocksManager()
-	
+
 	sendFunc := func(msg string) {}
-	
+
 	err := sm.StartSocks("test1", "0", sendFunc)
 	if err != nil {
 		t.Fatalf("StartSocks failed: %v", err)
 	}
-	
+
 	err = sm.StopSocks("test1")
 	if err != nil {
 		t.Errorf("StopSocks failed: %v", err)
 	}
-	
+
 	proxies := sm.ListSocks()
 	if len(proxies) != 0 {
 		t.Errorf("Expected 0 proxies, got %d", len(proxies))
@@ -177,14 +177,14 @@ func TestSocksManager_StopSocks(t *testing.T) {
 
 func TestSocksManager_DuplicateID(t *testing.T) {
 	sm := NewSocksManager()
-	
+
 	sendFunc := func(msg string) {}
-	
+
 	err := sm.StartSocks("test1", "0", sendFunc)
 	if err != nil {
 		t.Fatalf("First StartSocks failed: %v", err)
 	}
-	
+
 	err = sm.StartSocks("test1", "0", sendFunc)
 	if err == nil {
 		t.Error("Expected error for duplicate SOCKS ID, got nil")
@@ -193,14 +193,14 @@ func TestSocksManager_DuplicateID(t *testing.T) {
 
 func TestSocksManager_StopAll(t *testing.T) {
 	sm := NewSocksManager()
-	
+
 	sendFunc := func(msg string) {}
-	
+
 	_ = sm.StartSocks("test1", "0", sendFunc)
 	_ = sm.StartSocks("test2", "0", sendFunc)
-	
+
 	sm.StopAll()
-	
+
 	proxies := sm.ListSocks()
 	if len(proxies) != 0 {
 		t.Errorf("Expected 0 proxies after StopAll, got %d", len(proxies))
@@ -211,7 +211,7 @@ func TestSocksManager_StopAll(t *testing.T) {
 func TestHandleSocksConnectionIPv4Response(t *testing.T) {
 	sm := NewSocksManager()
 	sink := &cmdSink{ch: make(chan string, 10)}
-	
+
 	proxy := &SocksProxy{
 		ID:          "test-proxy",
 		LocalAddr:   "127.0.0.1:9050",
@@ -220,30 +220,30 @@ func TestHandleSocksConnectionIPv4Response(t *testing.T) {
 		connReady:   make(map[string]chan bool),
 		sendFunc:    sink.send,
 	}
-	
+
 	sm.mu.Lock()
 	sm.proxies[proxy.ID] = proxy
 	sm.mu.Unlock()
-	
+
 	client, server := net.Pipe()
 	defer client.Close()
 	defer server.Close()
-	
+
 	// Signal ready chan immediately to skip client connection wait
 	readyChan := make(chan bool, 1)
 	proxy.mu.Lock()
 	proxy.connReady["conn1"] = readyChan
 	proxy.mu.Unlock()
-	
+
 	// Handle connection in background
 	go sm.handleSocksConnection(proxy, "conn1", server)
-	
+
 	// Send SOCKS5 greeting
 	_, err := client.Write([]byte{0x05, 0x01, 0x00})
 	if err != nil {
 		t.Fatalf("Failed to send greeting: %v", err)
 	}
-	
+
 	// Read greeting response: [version, auth_method]
 	buf := make([]byte, 2)
 	_, err = client.Read(buf)
@@ -253,19 +253,19 @@ func TestHandleSocksConnectionIPv4Response(t *testing.T) {
 	if buf[0] != 0x05 || buf[1] != 0x00 {
 		t.Fatalf("Unexpected greeting response: %v", buf)
 	}
-	
+
 	// Send SOCKS5 IPv4 connect request to 192.0.2.1:80
 	// [version, cmd, reserved, addr_type, ip[4], port[2]]
 	request := []byte{
-		0x05, 0x01, 0x00, 0x01,           // version, connect, reserved, IPv4
-		192, 0, 2, 1,                     // 192.0.2.1
-		0x00, 0x50,                       // port 80
+		0x05, 0x01, 0x00, 0x01, // version, connect, reserved, IPv4
+		192, 0, 2, 1, // 192.0.2.1
+		0x00, 0x50, // port 80
 	}
 	_, err = client.Write(request)
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
-	
+
 	// Signal ready to allow connection to proceed
 	go func() {
 		time.Sleep(100 * time.Millisecond)
@@ -274,14 +274,14 @@ func TestHandleSocksConnectionIPv4Response(t *testing.T) {
 		default:
 		}
 	}()
-	
+
 	// Read response and check it contains IPv4 address type
 	response := make([]byte, 10)
 	_, err = client.Read(response)
 	if err != nil {
 		t.Fatalf("Failed to read response: %v", err)
 	}
-	
+
 	// Response should be: [version, status, reserved, addr_type, addr[4], port[2]]
 	if response[0] != 0x05 {
 		t.Errorf("Expected version 0x05, got 0x%02x", response[0])
@@ -295,7 +295,7 @@ func TestHandleSocksConnectionIPv4Response(t *testing.T) {
 func TestHandleSocksConnectionIPv6Response(t *testing.T) {
 	sm := NewSocksManager()
 	sink := &cmdSink{ch: make(chan string, 10)}
-	
+
 	proxy := &SocksProxy{
 		ID:          "test-proxy",
 		LocalAddr:   "127.0.0.1:9050",
@@ -304,17 +304,17 @@ func TestHandleSocksConnectionIPv6Response(t *testing.T) {
 		connReady:   make(map[string]chan bool),
 		sendFunc:    sink.send,
 	}
-	
+
 	sm.mu.Lock()
 	sm.proxies[proxy.ID] = proxy
 	sm.mu.Unlock()
-	
+
 	client, server := net.Pipe()
 	defer client.Close()
 	defer server.Close()
-	
+
 	connID := "conn2"
-	
+
 	// Handle connection in background
 	go func() {
 		// Signal ready chan after a delay to allow request to be processed
@@ -329,42 +329,42 @@ func TestHandleSocksConnectionIPv6Response(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	go sm.handleSocksConnection(proxy, connID, server)
-	
+
 	// Send SOCKS5 greeting
 	_, err := client.Write([]byte{0x05, 0x01, 0x00})
 	if err != nil {
 		t.Fatalf("Failed to send greeting: %v", err)
 	}
-	
+
 	// Read greeting response
 	buf := make([]byte, 2)
 	_, err = client.Read(buf)
 	if err != nil {
 		t.Fatalf("Failed to read greeting response: %v", err)
 	}
-	
+
 	// Send SOCKS5 IPv6 connect request to [2001:db8::1]:443
 	// [version, cmd, reserved, addr_type, ip[16], port[2]]
 	request := []byte{
-		0x05, 0x01, 0x00, 0x04,                           // version, connect, reserved, IPv6
-		0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00,  // 2001:db8:0:0
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,  // ::1
-		0x01, 0xbb,                                       // port 443
+		0x05, 0x01, 0x00, 0x04, // version, connect, reserved, IPv6
+		0x20, 0x01, 0x0d, 0xb8, 0x00, 0x00, 0x00, 0x00, // 2001:db8:0:0
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, // ::1
+		0x01, 0xbb, // port 443
 	}
 	_, err = client.Write(request)
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
-	
+
 	// Read response and check it contains IPv6 address type
 	response := make([]byte, 22)
 	_, err = client.Read(response)
 	if err != nil {
 		t.Fatalf("Failed to read response: %v", err)
 	}
-	
+
 	// Response should be: [version, status, reserved, addr_type, addr[16], port[2]]
 	if response[0] != 0x05 {
 		t.Errorf("Expected version 0x05, got 0x%02x", response[0])
@@ -382,7 +382,7 @@ func TestHandleSocksConnectionIPv6Response(t *testing.T) {
 func TestHandleSocksConnectionDomainResponse(t *testing.T) {
 	sm := NewSocksManager()
 	sink := &cmdSink{ch: make(chan string, 10)}
-	
+
 	proxy := &SocksProxy{
 		ID:          "test-proxy",
 		LocalAddr:   "127.0.0.1:9050",
@@ -391,17 +391,17 @@ func TestHandleSocksConnectionDomainResponse(t *testing.T) {
 		connReady:   make(map[string]chan bool),
 		sendFunc:    sink.send,
 	}
-	
+
 	sm.mu.Lock()
 	sm.proxies[proxy.ID] = proxy
 	sm.mu.Unlock()
-	
+
 	client, server := net.Pipe()
 	defer client.Close()
 	defer server.Close()
-	
+
 	connID := "conn3"
-	
+
 	// Handle connection in background
 	go func() {
 		// Signal ready chan after a delay to allow request to be processed
@@ -416,34 +416,34 @@ func TestHandleSocksConnectionDomainResponse(t *testing.T) {
 			}
 		}
 	}()
-	
+
 	go sm.handleSocksConnection(proxy, connID, server)
-	
+
 	// Send SOCKS5 greeting
 	_, err := client.Write([]byte{0x05, 0x01, 0x00})
 	if err != nil {
 		t.Fatalf("Failed to send greeting: %v", err)
 	}
-	
+
 	// Read greeting response
 	buf := make([]byte, 2)
 	_, err = client.Read(buf)
 	if err != nil {
 		t.Fatalf("Failed to read greeting response: %v", err)
 	}
-	
+
 	// Send SOCKS5 domain connect request to example.com:443
 	// [version, cmd, reserved, addr_type, domain_len, domain, port[2]]
 	domain := "example.com"
 	request := []byte{0x05, 0x01, 0x00, 0x03, byte(len(domain))}
 	request = append(request, []byte(domain)...)
 	request = append(request, 0x01, 0xbb) // port 443
-	
+
 	_, err = client.Write(request)
 	if err != nil {
 		t.Fatalf("Failed to send request: %v", err)
 	}
-	
+
 	// Read response and check it contains domain address type
 	response := make([]byte, 256)
 	n, err := client.Read(response)
@@ -451,7 +451,7 @@ func TestHandleSocksConnectionDomainResponse(t *testing.T) {
 		t.Fatalf("Failed to read response: %v", err)
 	}
 	response = response[:n]
-	
+
 	// Response should be: [version, status, reserved, addr_type, domain_len, domain, port[2]]
 	if response[0] != 0x05 {
 		t.Errorf("Expected version 0x05, got 0x%02x", response[0])

@@ -152,7 +152,7 @@ func ExecuteJourney(t *testing.T, httpClient *http.Client, endpoint string, jour
 	if journey.Description != "" {
 		t.Logf("  Description: %s", journey.Description)
 	}
-	
+
 	// Set default timeout
 	defaultTimeout := journey.DefaultTimeoutMS
 	if defaultTimeout == 0 {
@@ -277,7 +277,9 @@ func executeUploadStep(t *testing.T, httpClient *http.Client, endpoint string, s
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("upload failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	var out struct{ Status string `json:"status"` }
+	var out struct {
+		Status string `json:"status"`
+	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode upload response: %v", err)
 	}
@@ -356,12 +358,12 @@ func sendCommand(t *testing.T, client *http.Client, endpoint, command string, ti
 		Command:   command,
 		TimeoutMS: timeoutMS,
 	}
-	
+
 	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("failed to marshal command request: %v", err)
 	}
-	
+
 	resp, err := client.Post(endpoint+"/command", "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatalf("command request failed: %v", err)

@@ -63,10 +63,10 @@ type SessionArbiter struct {
 func NewSessionArbiter(logf func(string, ...interface{})) (*SessionArbiter, error) {
 	// Check if stdin is a terminal first
 	stdinIsTTY := term.IsTerminal(int(os.Stdin.Fd()))
-	
+
 	var tty *os.File
 	var hasTTY bool
-	
+
 	// Only try to use /dev/tty if stdin is also a terminal
 	// This ensures we read from the same source the process is receiving input from
 	if stdinIsTTY {
@@ -82,7 +82,7 @@ func NewSessionArbiter(logf func(string, ...interface{})) (*SessionArbiter, erro
 		tty = os.Stdin
 		hasTTY = false
 	}
-	
+
 	var cooked *term.State
 	if hasTTY {
 		st, terr := term.GetState(int(tty.Fd()))
@@ -222,48 +222,54 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 			}
 		}()
 	} else {
-		// Non-TTY (like pipe/file): Use a helper goroutine to read stdin
-		// so we can use select to check context without blocking on Read().
+		// Non-TTY (like pipe/file): Set read deadline and read directly in main goroutine
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
 			buf := make([]byte, 4096)
-			
+
+			supportsDeadline := true
+
 			for {
-				// Create a channel for this read operation
-				readDone := make(chan struct{})
-				var n int
-				var err error
-				
-				// Start the blocking read in a background goroutine
-				go func() {
-					n, err = a.tty.Read(buf)
-					close(readDone)
-				}()
-				
-				// Wait for either read to complete or context to be cancelled
-				select {
-				case <-readDone:
-					// Read completed
-					if n > 0 {
-						a.markHeartbeat()
-						if serr := cfg.Send(buf[:n]); serr != nil {
-							inputErr <- serr
+				// Try to set a read deadline (may fail for pipes/files)
+				if supportsDeadline && readDeadline > 0 {
+					if err := a.tty.SetReadDeadline(time.Now().Add(readDeadline)); err != nil {
+						// This file type doesn't support deadlines
+						// Fall back to non-deadline mode
+						supportsDeadline = false
+						_ = a.tty.SetReadDeadline(time.Time{})
+					}
+				}
+
+				n, err := a.tty.Read(buf)
+
+				if n > 0 {
+					a.markHeartbeat()
+					if serr := cfg.Send(buf[:n]); serr != nil {
+						inputErr <- serr
+						return
+					}
+				}
+
+				if err != nil {
+					if isTimeout(err) {
+						select {
+						case <-pctx.Done():
 							return
+						default:
+							continue
 						}
 					}
-					if err != nil && err != io.EOF {
+					if err != io.EOF {
 						inputErr <- err
-						return
 					}
-					if err == io.EOF {
-						return
-					}
-					
-				case <-pctx.Done():
-					// Context cancelled - exit immediately WITHOUT waiting for read
-					// Note: the background read goroutine will keep running but we don't care
 					return
+				}
+
+				select {
+				case <-pctx.Done():
+					return
+				default:
 				}
 			}
 		}()
@@ -362,7 +368,10 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 			case <-pctx.Done():
 				return
 			case <-ticker.C:
-				if time.Since(a.lastBeat) > 2*heartbeatInterval {
+				a.mu.Lock()
+				lastBeat := a.lastBeat
+				a.mu.Unlock()
+				if time.Since(lastBeat) > 2*heartbeatInterval {
 					watchdogErr <- fmt.Errorf("heartbeat timeout after %s", 2*heartbeatInterval)
 					return
 				}
