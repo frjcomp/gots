@@ -374,6 +374,9 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 		err = e
 	}
 
+	// Cancel context to signal all goroutines to exit
+	a.cancel()
+
 	a.mu.Lock()
 	if cfg.SendExit != nil {
 		_ = cfg.SendExit()
@@ -384,6 +387,9 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	}
 	a.detachLocked()
 	a.mu.Unlock()
+
+	// Wait for all goroutines to finish (input pump, output pump, watchdog)
+	a.wg.Wait()
 
 	return err
 }
