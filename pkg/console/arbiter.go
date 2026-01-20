@@ -231,6 +231,14 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 			_ = setNonblock(a.tty.Fd(), true)
 			buf := make([]byte, 4096)
 			for {
+				// Check for context cancellation FIRST before reading
+				// This ensures we stop consuming input immediately when PTY ends
+				select {
+				case <-pctx.Done():
+					return
+				default:
+				}
+				
 				n, err := a.tty.Read(buf)
 				if n > 0 {
 					a.markHeartbeat()
@@ -242,17 +250,12 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 				if err != nil {
 					// Ignore EAGAIN/EWOULDBLOCK errors from non-blocking reads
 					if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
-						// No data available, continue reading
+						// No data available, sleep briefly before retrying
+						time.Sleep(time.Millisecond)
 					} else {
 						inputErr <- err
 						return
 					}
-				}
-				// If no data was read, yield to avoid busy-waiting
-				select {
-				case <-pctx.Done():
-					return
-				case <-time.After(1 * time.Millisecond):
 				}
 			}
 		}()
@@ -375,7 +378,9 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	}
 
 	// Cancel context to signal all goroutines to exit
-	a.cancel()
+	if a.cancel != nil {
+		a.cancel()
+	}
 
 	// Wait for all goroutines to finish BEFORE restoring stdin mode
 	// The input pump goroutine still needs stdin to be in non-blocking mode
