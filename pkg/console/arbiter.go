@@ -371,6 +371,10 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	if cfg.SendExit != nil {
 		_ = cfg.SendExit()
 	}
+	// Restore blocking mode on stdin if we set it non-blocking
+	if !a.hasTTY {
+		_ = syscall.SetNonblock(int(a.tty.Fd()), false)
+	}
 	a.detachLocked()
 	a.mu.Unlock()
 
