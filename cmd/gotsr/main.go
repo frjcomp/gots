@@ -92,13 +92,13 @@ func runClient(target string, maxRetries int, sharedSecret, certFingerprint stri
 
 	connectWithRetry(cfg.Target, cfg.MaxRetries, cfg.SharedSecret, cfg.CertFingerprint, func(t, s, f string) client.ReverseClientInterface {
 		return client.NewReverseClient(t, s, f)
-	}, time.Sleep)
+	}, time.Sleep, 5*time.Minute)
 	return nil
 }
 
 type clientFactory func(target, sharedSecret, certFingerprint string) client.ReverseClientInterface
 
-func connectWithRetry(target string, maxRetries int, sharedSecret, certFingerprint string, newClient clientFactory, sleep func(time.Duration)) {
+func connectWithRetry(target string, maxRetries int, sharedSecret, certFingerprint string, newClient clientFactory, sleep func(time.Duration), maxBackoff time.Duration) {
 	retries := 0
 	backoff := 5 * time.Second
 
@@ -122,8 +122,8 @@ func connectWithRetry(target string, maxRetries int, sharedSecret, certFingerpri
 				time.Sleep(backoff)
 			}
 			backoff *= 2
-			if backoff > 5*time.Minute {
-				backoff = 5 * time.Minute
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 			continue
 		}
@@ -149,8 +149,8 @@ func connectWithRetry(target string, maxRetries int, sharedSecret, certFingerpri
 				time.Sleep(backoff)
 			}
 			backoff *= 2
-			if backoff > 5*time.Minute {
-				backoff = 5 * time.Minute
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 		} else {
 			// HandleCommands returned nil (EOF from listener closing connection)
@@ -173,8 +173,8 @@ func connectWithRetry(target string, maxRetries int, sharedSecret, certFingerpri
 				time.Sleep(backoff)
 			}
 			backoff *= 2
-			if backoff > 5*time.Minute {
-				backoff = 5 * time.Minute
+			if backoff > maxBackoff {
+				backoff = maxBackoff
 			}
 		}
 	}

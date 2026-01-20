@@ -78,7 +78,7 @@ func TestConnectWithRetry_MaxRetriesReachedOnConnectFailures(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() { connectWithRetry("127.0.0.1:8443", 3, "", "", factory, noSleep); close(done) }()
+	go func() { connectWithRetry("127.0.0.1:8443", 3, "", "", factory, noSleep, 100*time.Millisecond); close(done) }()
 
 	select {
 	case <-done:
@@ -104,7 +104,7 @@ func TestConnectWithRetry_ReconnectAfterHandleCommandsError(t *testing.T) {
 	}
 
 	done := make(chan struct{})
-	go func() { connectWithRetry("127.0.0.1:8443", 2, "", "", factory, noSleep); close(done) }()
+	go func() { connectWithRetry("127.0.0.1:8443", 2, "", "", factory, noSleep, 100*time.Millisecond); close(done) }()
 
 	select {
 	case <-done:
@@ -135,7 +135,7 @@ func TestConnectWithRetrySuccessful(t *testing.T) {
 	// Run with 1 retry so it exits after HandleCommands returns nil
 	done := make(chan struct{})
 	go func() {
-		connectWithRetry("127.0.0.1:8443", 0, "", "", factory, noSleep)
+		connectWithRetry("127.0.0.1:8443", 0, "", "", factory, noSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -166,7 +166,7 @@ func TestConnectWithRetryInfiniteRetries(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		// This should keep trying forever, but we'll stop after a few attempts
-		connectWithRetry("127.0.0.1:8443", 0, "", "", factory, noSleep)
+		connectWithRetry("127.0.0.1:8443", 0, "", "", factory, noSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -200,7 +200,7 @@ func TestConnectWithRetryBackoffMaximum(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		connectWithRetry("127.0.0.1:8443", 5, "", "", factory, noSleep)
+		connectWithRetry("127.0.0.1:8443", 5, "", "", factory, noSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -231,7 +231,7 @@ func TestConnectWithRetryHandleCommandsSuccess(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		connectWithRetry("127.0.0.1:8443", 2, "", "", factory, noSleep)
+		connectWithRetry("127.0.0.1:8443", 2, "", "", factory, noSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -303,7 +303,7 @@ func TestRunClientValidConfig(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		// This simulates what runClient does
-		connectWithRetry("localhost:9001", 1, "", "", originalNewClient, noSleep)
+		connectWithRetry("localhost:9001", 1, "", "", originalNewClient, noSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -329,7 +329,7 @@ func TestConnectWithRetryNilSleepFunction(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		// Pass nil for sleep function
-		connectWithRetry("127.0.0.1:8443", 1, "", "", factory, nil)
+		connectWithRetry("127.0.0.1:8443", 1, "", "", factory, nil, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -352,7 +352,7 @@ func TestConnectWithRetrySuccessfulFirstAttempt(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		connectWithRetry("127.0.0.1:8443", 1, "", "", factory, noSleep)
+		connectWithRetry("127.0.0.1:8443", 1, "", "", factory, noSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -398,7 +398,7 @@ func TestConnectWithRetryBackoffMaximumCapping(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		connectWithRetry("127.0.0.1:8443", 3, "", "", factory, trackingSleep)
+		connectWithRetry("127.0.0.1:8443", 3, "", "", factory, trackingSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
@@ -409,7 +409,7 @@ func TestConnectWithRetryBackoffMaximumCapping(t *testing.T) {
 		t.Fatal("connectWithRetry did not complete")
 	}
 
-	// Verify backoff increases: 5s, 10s
+	// Verify backoff increases: 5s, then caps at 100ms
 	mu.Lock()
 	defer mu.Unlock()
 	if len(sleepDurations) < 2 {
@@ -418,8 +418,11 @@ func TestConnectWithRetryBackoffMaximumCapping(t *testing.T) {
 	if sleepDurations[0] != 5*time.Second {
 		t.Errorf("expected first backoff to be 5s, got %v", sleepDurations[0])
 	}
-	if sleepDurations[1] != 10*time.Second {
-		t.Errorf("expected second backoff to be 10s, got %v", sleepDurations[1])
+	if sleepDurations[1] != 100*time.Millisecond {
+		t.Errorf("expected second backoff to be capped at 100ms, got %v", sleepDurations[1])
+	}
+	if len(sleepDurations) > 2 && sleepDurations[2] > 100*time.Millisecond {
+		t.Errorf("expected backoff capped at 100ms, got %v", sleepDurations[2])
 	}
 }
 
@@ -437,7 +440,7 @@ func TestConnectWithRetryWithAuthentication(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		connectWithRetry("127.0.0.1:8443", 1, "test-secret", "test-fingerprint", factory, noSleep)
+		connectWithRetry("127.0.0.1:8443", 1, "test-secret", "test-fingerprint", factory, noSleep, 100*time.Millisecond)
 		close(done)
 	}()
 
