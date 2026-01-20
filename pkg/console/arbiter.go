@@ -222,55 +222,47 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 			}
 		}()
 	} else {
-		// Non-TTY (like pipe/file): read stdin and forward to remote.
-		// This is called during PTY mode only.When PTY ends, the context
-		// is cancelled and we need to exit immediately WITHOUT reading more stdin.
-		// We check context multiple times per loop to prevent consuming input.
+		// Non-TTY (like pipe/file): Use a helper goroutine to read stdin
+		// so we can use select to check context without blocking on Read().
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
 			buf := make([]byte, 4096)
+			
 			for {
-				// Check 1: Before any blocking operation
+				// Create a channel for this read operation
+				readDone := make(chan struct{})
+				var n int
+				var err error
+				
+				// Start the blocking read in a background goroutine
+				go func() {
+					n, err = a.tty.Read(buf)
+					close(readDone)
+				}()
+				
+				// Wait for either read to complete or context to be cancelled
 				select {
-				case <-pctx.Done():
-					return
-				default:
-				}
-				
-				// Set a short read timeout so we can check context frequently
-				_ = a.tty.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
-				n, err := a.tty.Read(buf)
-				
-				// Check 2: Immediately after read returns
-				select {
-				case <-pctx.Done():
-					return
-				default:
-				}
-				
-				if n > 0 {
-					a.markHeartbeat()
-					if serr := cfg.Send(buf[:n]); serr != nil {
-						inputErr <- serr
+				case <-readDone:
+					// Read completed
+					if n > 0 {
+						a.markHeartbeat()
+						if serr := cfg.Send(buf[:n]); serr != nil {
+							inputErr <- serr
+							return
+						}
+					}
+					if err != nil && err != io.EOF {
+						inputErr <- err
 						return
 					}
-				}
-				
-				// Check 3: After send operation
-				select {
-				case <-pctx.Done():
-					return
-				default:
-				}
-				
-				if err != nil {
-					if isTimeout(err) {
-						// Timeout expected - loop back to check context
-						continue
+					if err == io.EOF {
+						return
 					}
-					// Real error - exit
-					inputErr <- err
+					
+				case <-pctx.Done():
+					// Context cancelled - exit immediately WITHOUT waiting for read
+					// Note: the background read goroutine will keep running but we don't care
 					return
 				}
 			}
@@ -408,8 +400,6 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	if cfg.SendExit != nil {
 		_ = cfg.SendExit()
 	}
-	// Clear any read deadline set during input pump operations
-	_ = a.tty.SetReadDeadline(time.Time{})
 	a.detachLocked()
 	a.mu.Unlock()
 
