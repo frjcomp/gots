@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -396,7 +395,9 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, 
 func interactiveShellBasic(l server.ListenerInterface, arbiter *console.SessionArbiter) {
 	printHelp()
 
-	scanner := bufio.NewScanner(os.Stdin)
+	// For non-TTY mode (pipes in tests), we can't use buffered readers because
+	// they interfere with PTY input pumps. Instead, read line-by-line with raw bytes.
+	buf := make([]byte, 4096)
 
 	for {
 		// Print prompt directly to stdout (unbuffered)
@@ -405,17 +406,32 @@ func interactiveShellBasic(l server.ListenerInterface, arbiter *console.SessionA
 		_ = os.Stdout.Sync()
 		_ = os.Stderr.Sync()
 
-		// Scan input line
-		if !scanner.Scan() {
-			return
+		// Read one line from stdin without buffering
+		n := 0
+		for n < len(buf)-1 {
+			// Read one byte at a time to avoid buffering
+			tmp := make([]byte, 1)
+			rn, err := os.Stdin.Read(tmp)
+			if err != nil {
+				return
+			}
+			if rn == 0 {
+				return
+			}
+			buf[n] = tmp[0]
+			n++
+			if tmp[0] == '\n' {
+				break
+			}
 		}
 
-		line := scanner.Text()
-		if line == "" {
+		line := string(buf[:n])
+		input := strings.TrimSpace(line)
+		if input == "" {
 			continue
 		}
 
-		parts := strings.Fields(line)
+		parts := strings.Fields(input)
 		command := parts[0]
 
 		switch command {
@@ -740,17 +756,15 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 				exitMu.Lock()
 				if exitSent {
 					exitMu.Unlock()
-					return nil
+					return io.EOF
 				}
 				exitSent = true
 				exitMu.Unlock()
 				// Send exit command and close the channel
-				// The write pump will see the closed channel and print "[Remote shell exited]"
-				// Then it will send io.EOF to outputErr, causing RunPtySession to return
+				// Return EOF to stop the input pump from trying to read more
 				_ = l.SendCommand(clientAddr, protocol.CmdPtyExit)
 				l.ExitPtyMode(clientAddr)
-				// Return success - let the write pump handle the cleanup
-				return nil
+				return io.EOF
 			}
 		}
 		encoded, err := compression.CompressToHex(data)
@@ -793,6 +807,8 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 	}
 	// Clear any read deadlines set by PTY session (best effort - may not be supported on all file types)
 	_ = os.Stdin.SetReadDeadline(time.Time{})
+	// Flush any pending input on stdin to clear buffered data from PTY session
+	_ = flushStdin()
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.
