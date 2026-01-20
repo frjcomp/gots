@@ -744,7 +744,7 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 				// Then it will send io.EOF to outputErr, causing RunPtySession to return
 				_ = l.SendCommand(clientAddr, protocol.CmdPtyExit)
 				l.ExitPtyMode(clientAddr)
-				// Return success - let the write pump print the message
+				// Return success - let the write pump handle the cleanup
 				return nil
 			}
 		}

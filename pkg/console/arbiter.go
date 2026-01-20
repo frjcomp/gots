@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"sync"
-	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -223,23 +222,33 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 			}
 		}()
 	} else {
-		// Non-TTY (like pipe/file): read without deadlines but non-blocking
+		// Non-TTY (like pipe/file): read stdin and forward to remote.
+		// This is called during PTY mode only.When PTY ends, the context
+		// is cancelled and we need to exit immediately WITHOUT reading more stdin.
+		// We check context multiple times per loop to prevent consuming input.
 		a.wg.Add(1)
 		go func() {
 			defer a.wg.Done()
-			// Try to set non-blocking mode for pipes
-			_ = setNonblock(a.tty.Fd(), true)
 			buf := make([]byte, 4096)
 			for {
-				// Check for context cancellation FIRST before reading
-				// This ensures we stop consuming input immediately when PTY ends
+				// Check 1: Before any blocking operation
 				select {
 				case <-pctx.Done():
 					return
 				default:
 				}
 				
+				// Set a short read timeout so we can check context frequently
+				_ = a.tty.SetReadDeadline(time.Now().Add(5 * time.Millisecond))
 				n, err := a.tty.Read(buf)
+				
+				// Check 2: Immediately after read returns
+				select {
+				case <-pctx.Done():
+					return
+				default:
+				}
+				
 				if n > 0 {
 					a.markHeartbeat()
 					if serr := cfg.Send(buf[:n]); serr != nil {
@@ -247,15 +256,22 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 						return
 					}
 				}
+				
+				// Check 3: After send operation
+				select {
+				case <-pctx.Done():
+					return
+				default:
+				}
+				
 				if err != nil {
-					// Ignore EAGAIN/EWOULDBLOCK errors from non-blocking reads
-					if errors.Is(err, syscall.EAGAIN) || errors.Is(err, syscall.EWOULDBLOCK) {
-						// No data available, sleep briefly before retrying
-						time.Sleep(time.Millisecond)
-					} else {
-						inputErr <- err
-						return
+					if isTimeout(err) {
+						// Timeout expected - loop back to check context
+						continue
 					}
+					// Real error - exit
+					inputErr <- err
+					return
 				}
 			}
 		}()
@@ -392,10 +408,8 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	if cfg.SendExit != nil {
 		_ = cfg.SendExit()
 	}
-	// Restore blocking mode on stdin if we set it non-blocking
-	if !a.hasTTY {
-		_ = setNonblock(a.tty.Fd(), false)
-	}
+	// Clear any read deadline set during input pump operations
+	_ = a.tty.SetReadDeadline(time.Time{})
 	a.detachLocked()
 	a.mu.Unlock()
 
