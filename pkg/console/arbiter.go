@@ -377,6 +377,12 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	// Cancel context to signal all goroutines to exit
 	a.cancel()
 
+	// Wait for all goroutines to finish BEFORE restoring stdin mode
+	// The input pump goroutine still needs stdin to be in non-blocking mode
+	// while it's running. Once all goroutines are done, stdin is no longer
+	// being accessed, so it's safe to change its mode back to blocking.
+	a.wg.Wait()
+
 	a.mu.Lock()
 	if cfg.SendExit != nil {
 		_ = cfg.SendExit()
@@ -387,9 +393,6 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	}
 	a.detachLocked()
 	a.mu.Unlock()
-
-	// Wait for all goroutines to finish (input pump, output pump, watchdog)
-	a.wg.Wait()
 
 	return err
 }
