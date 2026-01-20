@@ -268,9 +268,11 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 				return
 			case data, ok := <-cfg.Incoming:
 				if !ok {
-					// Channel closed by remote - print message and exit
+					// Channel closed by remote - print message and exit (unless headless)
 					// Write to stdout (not stdin/tty) to ensure it's captured
-					fmt.Fprintf(os.Stdout, "\r\n[Remote shell exited]\r\n")
+					if !cfg.DisableLocalIO {
+						fmt.Fprintf(os.Stdout, "\r\n[Remote shell exited]\r\n")
+					}
 					outputErr <- io.EOF
 					return
 				}
@@ -284,8 +286,8 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 				a.markHeartbeat()
 				if _, err := a.tty.Write(data); err != nil {
 					// Write failed (e.g., stdin invalid in CI/headless mode).
-					// Only print message if we have a real TTY (interactive user).
-					if a.hasTTY {
+					// Only print message if we're not in headless mode.
+					if !cfg.DisableLocalIO {
 						fmt.Fprintf(os.Stdout, "\r\n[Remote shell exited]\r\n")
 					}
 					outputErr <- io.EOF
