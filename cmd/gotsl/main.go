@@ -4,11 +4,11 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"log"
-	"net"
 	"os"
 	"os/signal"
 	"strings"
@@ -20,6 +20,7 @@ import (
 	"github.com/frjcomp/gots/pkg/certs"
 	"github.com/frjcomp/gots/pkg/compression"
 	"github.com/frjcomp/gots/pkg/config"
+	"github.com/frjcomp/gots/pkg/console"
 	"github.com/frjcomp/gots/pkg/logging"
 	"github.com/frjcomp/gots/pkg/protocol"
 	"github.com/frjcomp/gots/pkg/server"
@@ -161,14 +162,29 @@ func runListener(port, networkInterface string, useSharedSecret, headless bool, 
 	logRedirector := newLogRedirector()
 	log.SetOutput(logRedirector)
 
-	interactiveShell(listener, logRedirector)
+	arbiter, err := console.NewSessionArbiter(log.Printf)
+	if err != nil {
+		log.Printf("Warning: failed to initialize TTY arbiter: %v", err)
+	}
+
+	interactiveShell(listener, logRedirector, arbiter)
 	return nil
 }
 
-func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) {
+func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, arbiter *console.SessionArbiter) {
+	if arbiter == nil {
+		if arb, err := console.NewSessionArbiter(log.Printf); err == nil {
+			arbiter = arb
+		}
+	}
+	if arbiter != nil {
+		defer arbiter.Close()
+		_ = arbiter.EnterShell()
+	}
+
 	// Check if stdin is a TTY; if not, use basic shell for compatibility with tests
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		interactiveShellBasic(l)
+		interactiveShellBasic(l, arbiter)
 		return
 	}
 
@@ -186,6 +202,9 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 	for {
 		// Recreate readline if needed (e.g., after PTY exit corrupts state)
 		if needsReinitialize {
+			if arbiter != nil {
+				_ = arbiter.EnterShell()
+			}
 			if rl != nil {
 				rl.Close()
 			}
@@ -217,7 +236,7 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 				if ttyFile != nil {
 					ttyFile.Close()
 				}
-				interactiveShellBasic(l)
+				interactiveShellBasic(l, arbiter)
 				return
 			}
 
@@ -285,7 +304,7 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 			if clientAddr == "" {
 				continue
 			}
-			enterPtyShell(l, clientAddr)
+			enterPtyShell(l, clientAddr, arbiter)
 			// After PTY exit, signal that we need to recreate readline
 			// This cleanly recovers from any terminal state corruption
 			needsReinitialize = true
@@ -369,7 +388,7 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector) 
 }
 
 // interactiveShellBasic is a fallback when readline is not available
-func interactiveShellBasic(l server.ListenerInterface) {
+func interactiveShellBasic(l server.ListenerInterface, arbiter *console.SessionArbiter) {
 	reader := bufio.NewReader(os.Stdin)
 
 	printHelp()
@@ -403,7 +422,7 @@ func interactiveShellBasic(l server.ListenerInterface) {
 			if clientAddr == "" {
 				continue
 			}
-			enterPtyShell(l, clientAddr)
+			enterPtyShell(l, clientAddr, arbiter)
 		case "upload":
 			if len(parts) != 4 {
 				fmt.Println("Usage: upload <client_id> <local_path> <remote_path>")
@@ -665,28 +684,24 @@ func handleDownloadGlobal(l server.ListenerInterface, currentClient, remotePath,
 	return true
 }
 
-func enterPtyShell(l server.ListenerInterface, clientAddr string) {
+func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *console.SessionArbiter) {
 	fmt.Printf("Entering PTY shell with %s...\n", clientAddr)
 
-	// Send PTY_MODE command
 	if err := l.SendCommand(clientAddr, protocol.CmdPtyMode); err != nil {
 		fmt.Printf("Error entering PTY mode: %v\n", err)
 		return
 	}
 
-	// Wait for confirmation
 	resp, err := l.GetResponse(clientAddr, 10*time.Second)
 	if err != nil {
 		fmt.Printf("Error getting PTY mode confirmation: %v\n", err)
 		return
 	}
-
 	if !strings.Contains(resp, "OK") {
 		fmt.Printf("Failed to enter PTY mode: %s\n", strings.ReplaceAll(resp, protocol.EndOfOutputMarker, ""))
 		return
 	}
 
-	// Enter PTY mode on listener side (creates PTY data channel)
 	ptyDataChan, err := l.EnterPtyMode(clientAddr)
 	if err != nil {
 		fmt.Printf("Error creating PTY data channel: %v\n", err)
@@ -696,161 +711,52 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string) {
 	fmt.Println("PTY shell active. Press Ctrl-D to return to listener prompt.")
 	fmt.Println("Press Ctrl-C to send interrupt to remote shell.")
 
-	// Setup raw terminal mode for local terminal
-	fd := int(os.Stdin.Fd())
-	oldState, err := term.MakeRaw(fd)
-	if err != nil {
-		fmt.Printf("Warning: Could not set raw mode: %v\n", err)
-		// Continue anyway
+	if arbiter == nil {
+		fmt.Println("TTY arbiter unavailable; aborting PTY session")
+		_ = l.SendCommand(clientAddr, protocol.CmdPtyExit)
+		l.ExitPtyMode(clientAddr)
+		return
 	}
 
-	// Channel to signal we should exit (closed channel broadcasts to all goroutines)
-	exitPty := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Track which goroutine triggered the exit to avoid double-closing
-	var exitOnce sync.Once
-
-	// WaitGroup to ensure both goroutines finish before exiting
-	var wg sync.WaitGroup
-	wg.Add(2) // For output and stdin goroutines
-
-	// Forward PTY output to stdout
-	go func() {
-		defer wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("Panic in PTY output goroutine: %v", r)
-			}
-		}()
-
-		for {
-			data, ok := <-ptyDataChan
-			if !ok {
-				// Channel closed - remote PTY exited
-				fmt.Printf("\r\n[Remote shell exited]\r\n")
-				exitOnce.Do(func() {
-					close(exitPty) // Broadcast exit to all goroutines
-				})
-				return
-			}
-			os.Stdout.Write(data)
-		}
-	}()
-
-	// Read from stdin and forward to PTY
-	go func() {
-		defer wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("Panic in PTY stdin goroutine: %v", r)
-			}
-			// Ensure deadline is cleared when goroutine exits
-			os.Stdin.SetReadDeadline(time.Time{})
-		}()
-
-		stdinBuf := make([]byte, 1024)
-
-		for {
-			// Check if we should exit
-			select {
-			case <-exitPty:
-				// Remote closed, stop reading stdin
-				return
-			default:
-				// Continue reading
-			}
-
-			// Set a read timeout so we can check exitPty periodically
-			os.Stdin.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
-			n, err := os.Stdin.Read(stdinBuf)
-
-			if err != nil {
-				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
-					// Timeout, check if we should exit in next iteration
-					continue
-				}
-				// EOF or error - exit gracefully
-				return
-			}
-
-			if n > 0 {
-				data := stdinBuf[:n]
-
-				// Check for Ctrl-D (EOF)
-				if strings.Contains(string(data), "\x04") {
-					exitOnce.Do(func() {
-						close(exitPty)
-					})
-					return
-				}
-
-				// **CRITICAL**: Double-check before sending in case remote just exited
-				select {
-				case <-exitPty:
-					return
-				default:
-				}
-
-				// Send data immediately to PTY
-				encoded, err := compression.CompressToHex(data)
-				if err != nil {
-					fmt.Printf("\nError encoding input: %v\n", err)
-					return
-				}
-
-				// Send command without blocking on response
-				if err := l.SendCommand(clientAddr, protocol.CmdPtyData+" "+encoded); err != nil {
-					log.Printf("Failed to send PTY data (client disconnected): %v", err)
-					return
-				}
+	sendFn := func(data []byte) error {
+		// Check for Ctrl-D which signals exit
+		for _, b := range data {
+			if b == 0x04 {
+				cancel()
+				return nil
 			}
 		}
-	}()
+		encoded, err := compression.CompressToHex(data)
+		if err != nil {
+			return err
+		}
+		return l.SendCommand(clientAddr, protocol.CmdPtyData+" "+encoded)
+	}
 
-	// Wait for exit signal
-	<-exitPty
+	sendExit := func() error {
+		return l.SendCommand(clientAddr, protocol.CmdPtyExit)
+	}
 
-	// Force any blocking stdin read to unblock immediately
-	_ = os.Stdin.SetReadDeadline(time.Now())
+	cfg := console.PtySessionConfig{
+		Incoming:          ptyDataChan,
+		Send:              sendFn,
+		SendExit:          sendExit,
+		ReadDeadline:      120 * time.Millisecond,
+		HeartbeatInterval: 12 * time.Second,
+		BackpressureLimit: cap(ptyDataChan) + 64,
+	}
 
-	// Exit PTY mode (sending PTY_EXIT but not waiting for response - client might have already exited)
-	fmt.Println("\nExiting PTY shell...")
-	_ = l.SendCommand(clientAddr, protocol.CmdPtyExit)
+	err = arbiter.RunPtySession(ctx, cfg)
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, io.EOF) {
+		fmt.Printf("PTY session ended: %v\n", err)
+	}
+
 	l.ExitPtyMode(clientAddr)
-
-	// Wait for both goroutines to fully finish before returning
-	wg.Wait()
-
-	// NOW restore terminal state after all goroutines are done
-	// Clear any read deadlines on stdin
-	os.Stdin.SetReadDeadline(time.Time{})
-
-	// Restore terminal state BEFORE disabling features
-	// This ensures the terminal is in cooked mode when we send the disable sequences
-	if oldState != nil {
-		term.Restore(fd, oldState)
-	}
-
-	// Now disable terminal features that may have been enabled by the remote PTY
-	// Send these in cooked mode so the terminal processes them correctly
-	// - Disable mouse tracking (all modes)
-	// - Disable focus events
-	// - Reset bracketed paste mode
-	os.Stdout.WriteString("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?2004l\x1b[?1004l")
-	os.Stdout.Sync()
-
-	// Flush stdin only if it's a real terminal (not a pipe/test)
-	// This consumes any pending input like terminal response escape sequences
-	if term.IsTerminal(fd) {
-		drainPendingInput(os.Stdin)
-		// Also flush using platform-specific method if available
-		if err := flushStdin(); err != nil {
-			log.Printf("Warning: failed to flush stdin after PTY exit: %v", err)
-		}
-	}
-
-	// Force a newline to reset the terminal display
-	fmt.Println()
+	_ = arbiter.EnterShell()
+	fmt.Println("gotsl> ")
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.
