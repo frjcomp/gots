@@ -9,6 +9,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"sync"
@@ -820,10 +821,36 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 	// Flush any pending input on stdin to clear buffered data from PTY session
 	_ = flushStdin()
 
+	// Explicitly reset the terminal to a known good state.
+	// This is critical when exiting from Windows shells which may leave the
+	// terminal in an unusual state. We use multiple approaches:
+	// 1. Try 'stty sane' to reset terminal attributes
+	// 2. Send ANSI reset sequence to ensure escape codes are processed properly
+	resetTerminal()
+
 	// Give the terminal a moment to fully reset after raw mode is disabled.
 	// This is especially important when connecting to Windows shells which may
 	// have different line ending or buffering behavior.
 	time.Sleep(100 * time.Millisecond)
+}
+
+// resetTerminal explicitly resets the terminal to a known good state after
+// exiting from a PTY session. This is critical when the remote shell is on
+// Windows, which may leave the terminal in an unusual state with corrupted
+// attributes or escape sequences not being processed properly.
+func resetTerminal() {
+	// Try to use stty to set terminal to a sane state.
+	// This resets all terminal attributes and ensures escape sequences work.
+	cmd := exec.Command("stty", "sane")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		// stty not available or failed, try ANSI reset sequence as fallback
+		// This sequence resets the terminal to default foreground/background colors
+		// and disables all special modes (bold, underline, reverse video, etc.)
+		fmt.Print("\033c")
+	}
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.
