@@ -228,7 +228,7 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 		go func() {
 			defer a.wg.Done()
 			// Try to set non-blocking mode for pipes
-			_ = syscall.SetNonblock(int(a.tty.Fd()), true)
+			_ = setNonblock(a.tty.Fd(), true)
 			buf := make([]byte, 4096)
 			for {
 				n, err := a.tty.Read(buf)
@@ -373,7 +373,7 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 	}
 	// Restore blocking mode on stdin if we set it non-blocking
 	if !a.hasTTY {
-		_ = syscall.SetNonblock(int(a.tty.Fd()), false)
+		_ = setNonblock(a.tty.Fd(), false)
 	}
 	a.detachLocked()
 	a.mu.Unlock()
