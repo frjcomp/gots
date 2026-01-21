@@ -433,6 +433,35 @@ func newHeadlessServer(l server.ListenerInterface, addr string) (*headlessServer
 		w.Write(decoded)
 	})
 
+	mux.HandleFunc("/disconnect", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req struct {
+			Client string `json:"client"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		clientAddr := strings.TrimSpace(req.Client)
+		if clientAddr == "" {
+			http.Error(w, "client is required", http.StatusBadRequest)
+			return
+		}
+
+		if err := l.DisconnectClient(clientAddr); err != nil {
+			http.Error(w, fmt.Sprintf("disconnect failed: %v", err), http.StatusNotFound)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("disconnected"))
+	})
+
 	mux.HandleFunc("/shutdown", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
