@@ -413,6 +413,8 @@ func (rc *ReverseClient) processCommand(command string) (shouldContinue bool, er
 		log.Printf("Received command: %s <data>", protocol.CmdUploadChunk)
 	} else if strings.HasPrefix(command, protocol.CmdSocksData+" ") {
 		// Skip logging SOCKS_DATA for performance (high frequency)
+	} else if strings.HasPrefix(command, protocol.CmdPtyData+" ") {
+		// Skip logging PTY_DATA to avoid printing compressed terminal data
 	} else {
 		log.Printf("Received command: %s", command)
 	}
