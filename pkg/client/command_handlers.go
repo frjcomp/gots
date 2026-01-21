@@ -14,6 +14,9 @@ import (
 	"github.com/frjcomp/gots/pkg/protocol"
 )
 
+// osExitFunc is a variable that can be mocked in tests
+var osExitFunc = os.Exit
+
 // handlePingCommand handles PING requests from the server
 func (rc *ReverseClient) handlePingCommand() error {
 	rc.writer.WriteString(protocol.CmdPong + "\n" + protocol.EndOfOutputMarker + "\n")
@@ -124,9 +127,11 @@ func (rc *ReverseClient) handleDownloadCommand(command string) error {
 	return rc.writer.Flush()
 }
 
-// handleExitCommand handles the EXIT command to gracefully close connection
+// handleExitCommand handles the EXIT command to gracefully shutdown the client process
 func (rc *ReverseClient) handleExitCommand() error {
-	return nil // Signal to return from main loop
+	log.Println("[*] Received exit command from listener, shutting down")
+	osExitFunc(0)
+	return nil // Never reached, but keeps type signature consistent
 }
 
 // handlePtyModeCommand enters PTY mode and spawns an interactive shell

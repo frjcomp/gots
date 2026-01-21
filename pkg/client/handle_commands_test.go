@@ -25,6 +25,13 @@ func mockClientLoop(input []byte, readerBufSize int) (*ReverseClient, *bytes.Buf
 
 // TestHandleCommandsPingExit ensures the loop processes PING then EXIT and returns
 func TestHandleCommandsPingExit(t *testing.T) {
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	osExitFunc = func(code int) {
+		// Just return, don't actually exit
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	input := []byte(protocol.CmdPing + "\n" + protocol.CmdExit + "\n")
 	rc, out := mockClientLoop(input, 0)
 
@@ -55,6 +62,13 @@ func TestHandleCommandsEOF(t *testing.T) {
 
 // TestHandleCommandsBufferFull covers the ErrBufferFull branch by using a tiny reader buffer
 func TestHandleCommandsBufferFull(t *testing.T) {
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	osExitFunc = func(code int) {
+		// Just return, don't actually exit
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	long := bytes.Repeat([]byte("A"), 2048) // long line with no newline initially
 	// Provide long line then a newline and EXIT to end the loop
 	payload := append(long, '\n')

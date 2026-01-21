@@ -232,12 +232,26 @@ func TestHandleShellCommandMultilineOutput(t *testing.T) {
 func TestProcessCommandExitCommand(t *testing.T) {
 	client, _ := createMockClient()
 
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	exitCalled := false
+	osExitFunc = func(code int) {
+		if code != 0 {
+			t.Errorf("EXIT command should exit with code 0, got: %d", code)
+		}
+		exitCalled = true
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	shouldContinue, err := client.processCommand(protocol.CmdExit)
 	if shouldContinue {
 		t.Error("EXIT command should return shouldContinue=false")
 	}
 	if err != nil {
 		t.Errorf("EXIT command should not error, got: %v", err)
+	}
+	if !exitCalled {
+		t.Error("EXIT command should call os.Exit")
 	}
 }
 
@@ -261,6 +275,13 @@ func TestProcessCommandPingCommand(t *testing.T) {
 
 // TestProcessCommandDispatcher tests correct command routing
 func TestProcessCommandDispatcher(t *testing.T) {
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	osExitFunc = func(code int) {
+		// Just return, don't actually exit
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	testCases := []struct {
 		name           string
 		command        string
@@ -399,6 +420,13 @@ func TestProcessCommandPing(t *testing.T) {
 
 // TestProcessCommandExit tests EXIT command via processCommand
 func TestProcessCommandExit(t *testing.T) {
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	osExitFunc = func(code int) {
+		// Just return, don't actually exit
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	client, _ := createMockClient()
 
 	shouldContinue, err := client.processCommand(protocol.CmdExit)

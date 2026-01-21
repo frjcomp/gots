@@ -499,6 +499,13 @@ func TestHandleCommandsEmptyCommand(t *testing.T) {
 
 // TestHandleCommandsExitCommand tests EXIT command handling
 func TestHandleCommandsExitCommand(t *testing.T) {
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	osExitFunc = func(code int) {
+		// Just return, don't actually exit
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	client, output := createMockClient()
 
 	// Create reader with PING then EXIT
@@ -521,6 +528,13 @@ func TestHandleCommandsExitCommand(t *testing.T) {
 
 // TestHandleCommandsShellCommand tests shell command execution in non-PTY mode
 func TestHandleCommandsShellCommand(t *testing.T) {
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	osExitFunc = func(code int) {
+		// Just return, don't actually exit
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	client, output := createMockClient()
 
 	// Create reader with shell command then EXIT
@@ -544,6 +558,13 @@ func TestHandleCommandsShellCommand(t *testing.T) {
 
 // TestHandleCommandsPingCommand tests PING command in loop
 func TestHandleCommandsPingCommand(t *testing.T) {
+	// Mock os.Exit to prevent actual process exit during test
+	originalExit := osExitFunc
+	osExitFunc = func(code int) {
+		// Just return, don't actually exit
+	}
+	defer func() { osExitFunc = originalExit }()
+
 	client, output := createMockClient()
 
 	// Create reader with PING commands and EXIT
