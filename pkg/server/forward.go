@@ -244,3 +244,10 @@ func (fm *ForwardManager) StopAll() {
 }
 
 // benign close detection moved to logutil.go
+// SetTestForwards allows tests to inject test forwards directly.
+// This should only be used for testing purposes.
+func (fm *ForwardManager) SetTestForwards(forwards map[string]*ForwardInfo) {
+	fm.mu.Lock()
+	defer fm.mu.Unlock()
+	fm.forwards = forwards
+}

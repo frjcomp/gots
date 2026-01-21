@@ -699,3 +699,233 @@ func TestReadlineRefreshAfterPtyExit(t *testing.T) {
 	t.Log("  See test comments for detailed manual testing procedure")
 	t.Log("  WARNING: No automated tests exist for this critical bug - manual testing is REQUIRED")
 }
+// testListenerWithManagers is a mock listener that also implements GetForwardManager and GetSocksManager
+type testListenerWithManagers struct {
+	*mockListener
+	forwardManager *server.ForwardManager
+	socksManager   *server.SocksManager
+}
+
+func (t *testListenerWithManagers) GetForwardManager() *server.ForwardManager {
+	return t.forwardManager
+}
+
+func (t *testListenerWithManagers) GetSocksManager() *server.SocksManager {
+	return t.socksManager
+}
+
+// TestShellCompleterStopForwardCompletion tests autocompletion for "stop forward <id>"
+func TestShellCompleterStopForwardCompletion(t *testing.T) {
+	// Create a listener with forwards using actual server.Listener
+	// We create a real listener but we'll just use the managers part
+	listener := server.NewListener("9999", "127.0.0.1", nil, "")
+
+	// Manually add some forwards to the manager
+	forwards := make(map[string]*server.ForwardInfo)
+	forwards["forward-001"] = &server.ForwardInfo{ID: "forward-001", LocalAddr: "127.0.0.1:8080", RemoteAddr: "10.0.0.1:80"}
+	forwards["forward-002"] = &server.ForwardInfo{ID: "forward-002", LocalAddr: "127.0.0.1:8081", RemoteAddr: "10.0.0.2:443"}
+
+	// Use test helper to set the forwards
+	listener.GetForwardManager().SetTestForwards(forwards)
+
+	completer := &shellCompleter{listener: listener}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "complete first forward ID",
+			input:    "stop forward ",
+			expected: []string{"forward-001", "forward-002"},
+		},
+		{
+			name:     "complete forward ID with partial match",
+			input:    "stop forward forward-00",
+			expected: []string{"1", "2"},
+		},
+		{
+			name:     "no completion for forward ID beyond match",
+			input:    "stop forward forward-001 ",
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suggestions, _ := completer.Do([]rune(tt.input), len(tt.input))
+
+			if len(suggestions) != len(tt.expected) {
+				t.Errorf("expected %d suggestions, got %d", len(tt.expected), len(suggestions))
+				return
+			}
+
+			// For forward IDs, order is not guaranteed due to map iteration, so just check presence
+			suggestionsSet := make(map[string]bool)
+			for _, s := range suggestions {
+				suggestionsSet[string(s)] = true
+			}
+
+			for _, exp := range tt.expected {
+				if !suggestionsSet[exp] {
+					t.Errorf("expected suggestion %q not found", exp)
+				}
+			}
+		})
+	}
+}
+
+// TestShellCompleterStopSocksCompletion tests autocompletion for "stop socks <id>"
+func TestShellCompleterStopSocksCompletion(t *testing.T) {
+	// Create a listener with SOCKS proxies
+	listener := server.NewListener("9999", "127.0.0.1", nil, "")
+
+	// Manually add some SOCKS proxies to the manager
+	proxies := make(map[string]*server.SocksProxy)
+	proxies["socks-1234567890"] = &server.SocksProxy{ID: "socks-1234567890", LocalAddr: "127.0.0.1:1080"}
+	proxies["socks-9876543210"] = &server.SocksProxy{ID: "socks-9876543210", LocalAddr: "127.0.0.1:1081"}
+
+	// Use test helper to set the SOCKS proxies
+	listener.GetSocksManager().SetTestSocks(proxies)
+
+	completer := &shellCompleter{listener: listener}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "complete first SOCKS ID",
+			input:    "stop socks ",
+			expected: []string{"socks-1234567890", "socks-9876543210"},
+		},
+		{
+			name:     "complete SOCKS ID with partial match",
+			input:    "stop socks socks-",
+			expected: []string{"1234567890", "9876543210"},
+		},
+		{
+			name:     "no completion beyond SOCKS ID",
+			input:    "stop socks socks-1234567890 ",
+			expected: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suggestions, _ := completer.Do([]rune(tt.input), len(tt.input))
+
+			if len(suggestions) != len(tt.expected) {
+				t.Errorf("expected %d suggestions, got %d", len(tt.expected), len(suggestions))
+				return
+			}
+
+			// For SOCKS IDs, order is not guaranteed due to map iteration, so just check presence
+			suggestionsSet := make(map[string]bool)
+			for _, s := range suggestions {
+				suggestionsSet[string(s)] = true
+			}
+
+			for _, exp := range tt.expected {
+				if !suggestionsSet[exp] {
+					t.Errorf("expected suggestion %q not found", exp)
+				}
+			}
+		})
+	}
+}
+
+// TestShellCompleterStopCompletionEmpty tests that completion returns empty when no forwards/socks exist
+func TestShellCompleterStopCompletionEmpty(t *testing.T) {
+	// Create a listener with no forwards or SOCKS proxies
+	fm := server.NewForwardManager()
+	sm := server.NewSocksManager()
+
+	ml := &testListenerWithManagers{
+		mockListener:   &mockListener{clients: []string{"192.168.1.2:1234"}},
+		forwardManager: fm,
+		socksManager:   sm,
+	}
+
+	completer := &shellCompleter{listener: ml}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected int
+	}{
+		{
+			name:     "no forward IDs available",
+			input:    "stop forward ",
+			expected: 0,
+		},
+		{
+			name:     "no SOCKS IDs available",
+			input:    "stop socks ",
+			expected: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suggestions, _ := completer.Do([]rune(tt.input), len(tt.input))
+
+			if len(suggestions) != tt.expected {
+				t.Errorf("expected %d suggestions, got %d", tt.expected, len(suggestions))
+			}
+		})
+	}
+}
+
+// TestShellCompleterExistingCommands tests that existing completion still works
+func TestShellCompleterExistingCommands(t *testing.T) {
+	ml := &mockListener{clients: []string{"192.168.1.2:1234", "5.6.7.8:2222"}}
+	completer := &shellCompleter{listener: ml}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected []string
+	}{
+		{
+			name:     "command completion",
+			input:    "st",
+			expected: []string{"op"},
+		},
+		{
+			name:     "stop subcommand forward",
+			input:    "stop f",
+			expected: []string{"orward"},
+		},
+		{
+			name:     "stop subcommand socks",
+			input:    "stop s",
+			expected: []string{"ocks"},
+		},
+		{
+			name:     "client ID completion",
+			input:    "shell ",
+			expected: []string{"1", "2"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			suggestions, _ := completer.Do([]rune(tt.input), len(tt.input))
+
+			if len(suggestions) != len(tt.expected) {
+				t.Errorf("expected %d suggestions, got %d", len(tt.expected), len(suggestions))
+				return
+			}
+
+			for i, exp := range tt.expected {
+				got := string(suggestions[i])
+				if got != exp {
+					t.Errorf("suggestion %d: expected %q, got %q", i, exp, got)
+				}
+			}
+		})
+	}
+}

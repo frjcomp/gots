@@ -434,3 +434,10 @@ func (sm *SocksManager) StopAll() {
 		delete(sm.proxies, id)
 	}
 }
+// SetTestSocks allows tests to inject test SOCKS proxies directly.
+// This should only be used for testing purposes.
+func (sm *SocksManager) SetTestSocks(proxies map[string]*SocksProxy) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.proxies = proxies
+}

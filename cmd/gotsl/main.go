@@ -946,6 +946,46 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 			}
 			return suggestions, len(prefix)
 		}
+
+		// For "stop forward <id>" completion - complete with forward IDs
+		if cmd == "stop" && len(parts) >= 2 && parts[1] == "forward" && 
+			(len(parts) == 2 || (len(parts) == 3 && !strings.HasSuffix(lineStr, " "))) {
+			if listener, ok := c.listener.(*server.Listener); ok {
+				forwards := listener.GetForwardManager().ListForwards()
+				var suggestions [][]rune
+				prefix := ""
+				if len(parts) == 3 {
+					prefix = parts[2]
+				}
+
+				for _, fwd := range forwards {
+					if strings.HasPrefix(fwd.ID, prefix) {
+						suggestions = append(suggestions, []rune(fwd.ID[len(prefix):]))
+					}
+				}
+				return suggestions, len(prefix)
+			}
+		}
+
+		// For "stop socks <id>" completion - complete with SOCKS IDs
+		if cmd == "stop" && len(parts) >= 2 && parts[1] == "socks" && 
+			(len(parts) == 2 || (len(parts) == 3 && !strings.HasSuffix(lineStr, " "))) {
+			if listener, ok := c.listener.(*server.Listener); ok {
+				proxies := listener.GetSocksManager().ListSocks()
+				var suggestions [][]rune
+				prefix := ""
+				if len(parts) == 3 {
+					prefix = parts[2]
+				}
+
+				for _, proxy := range proxies {
+					if strings.HasPrefix(proxy.ID, prefix) {
+						suggestions = append(suggestions, []rune(proxy.ID[len(prefix):]))
+					}
+				}
+				return suggestions, len(prefix)
+			}
+		}
 	}
 
 	return nil, 0
