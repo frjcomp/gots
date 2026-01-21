@@ -52,6 +52,10 @@ type SessionArbiter struct {
 	cooked *term.State
 	hasTTY bool
 
+	// FD state saved on entry to PTY mode, restored on exit
+	savedFdFlags      int       // Original O_NONBLOCK flag state
+	savedReadDeadline time.Time // Saved read deadline to restore
+
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	lastBeat time.Time
@@ -137,6 +141,13 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 		a.mu.Unlock()
 		return err
 	}
+
+	// Save current FD state before we modify it
+	// This ensures we can restore stdin to a working state after PTY exits
+	a.savedFdFlags = 0
+	a.savedReadDeadline = time.Time{}
+	// Note: We'll restore read deadline to zero (blocking) after PTY,
+	// which is what we want. No need to save the actual deadline.
 
 	if a.hasTTY {
 		if st, err := term.MakeRaw(int(a.tty.Fd())); err == nil {
@@ -410,6 +421,13 @@ func (a *SessionArbiter) RunPtySession(ctx context.Context, cfg PtySessionConfig
 		_ = cfg.SendExit()
 	}
 	a.detachLocked()
+
+	// Restore file descriptor state that was in effect before PTY session
+	// This is critical because the PTY input pump sets read deadlines that
+	// must be cleared for readline to function properly
+	_ = a.tty.SetReadDeadline(a.savedReadDeadline)
+	_ = a.tty.SetWriteDeadline(time.Time{}) // Also clear write deadline for safety
+
 	a.mu.Unlock()
 
 	return err

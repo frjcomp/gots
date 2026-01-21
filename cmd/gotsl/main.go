@@ -25,7 +25,6 @@ import (
 	"github.com/frjcomp/gots/pkg/protocol"
 	"github.com/frjcomp/gots/pkg/server"
 	"github.com/frjcomp/gots/pkg/version"
-	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -833,13 +832,6 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 	// This is especially important when connecting to Windows shells which may
 	// have different line ending or buffering behavior.
 	time.Sleep(200 * time.Millisecond)
-
-	// Ensure stdin is in a readable state: set it to blocking mode and clear any stale data.
-	// This is critical because the Windows PTY may have left stdin in an intermediate state.
-	// Only do this in TTY mode - in pipes (tests), this can cause blocking issues.
-	if term.IsTerminal(int(os.Stdin.Fd())) {
-		ensureStdinReadable()
-	}
 }
 
 // resetTerminal explicitly resets the terminal to a known good state after
@@ -874,49 +866,6 @@ func resetTerminal() {
 	// This resets the terminal to default foreground/background colors
 	// and disables all special modes (bold, underline, reverse video, etc.)
 	fmt.Print("\033c")
-}
-
-// ensureStdinReadable ensures stdin is in a readable state after PTY sessions.
-// Windows PTY sessions can leave stdin in a state where reads block indefinitely,
-// so we explicitly set non-blocking mode, drain any stale data, and return to blocking.
-func ensureStdinReadable() {
-	stdinFd := int(os.Stdin.Fd())
-
-	// First, ensure stdin is set to blocking mode with no read timeouts
-	// The PTY session may have set non-blocking mode or read deadlines
-	_ = os.Stdin.SetReadDeadline(time.Time{}) // Clear any deadline
-	_ = os.Stdin.SetWriteDeadline(time.Time{})
-
-	// Try to get current flags
-	flags, err := unix.FcntlInt(uintptr(stdinFd), unix.F_GETFL, 0)
-	if err != nil {
-		return // fcntl not available, skip
-	}
-
-	// Ensure stdin is in blocking mode (remove non-blocking flag if set)
-	if flags&unix.O_NONBLOCK != 0 {
-		// stdin is non-blocking, set it to blocking
-		_, _ = unix.FcntlInt(uintptr(stdinFd), unix.F_SETFL, flags&^unix.O_NONBLOCK)
-	}
-
-	// Now set non-blocking temporarily to drain any stale data without blocking
-	if _, err := unix.FcntlInt(uintptr(stdinFd), unix.F_SETFL, flags|unix.O_NONBLOCK); err != nil {
-		return
-	}
-	defer func() {
-		// Restore blocking mode
-		_, _ = unix.FcntlInt(uintptr(stdinFd), unix.F_SETFL, flags&^unix.O_NONBLOCK)
-	}()
-
-	// Drain any stale data from stdin (e.g., leftover from Windows shell output)
-	// This prevents stale data from interfering with readline
-	buf := make([]byte, 4096)
-	for {
-		n, err := os.Stdin.Read(buf)
-		if n == 0 || err != nil {
-			break // No more data or error (expected for non-blocking)
-		}
-	}
 }
 
 // deadlineReader is the minimal interface needed to drain pending input with deadlines.
