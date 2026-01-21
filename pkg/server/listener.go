@@ -449,19 +449,26 @@ func (l *Listener) GetClientIdentifier(clientAddr string) string {
 	return l.clientIdentifiers[clientAddr]
 }
 
-// DisconnectClient forcefully disconnects a client by its address.
+// DisconnectClient forcefully disconnects a client by sending it an EXIT command.
+// This allows the client to gracefully shutdown before closing the connection.
 func (l *Listener) DisconnectClient(clientAddr string) error {
 	l.mutex.Lock()
-	defer l.mutex.Unlock()
-
 	cmdChan, exists := l.clientConnections[clientAddr]
+	l.mutex.Unlock()
+
 	if !exists {
 		return fmt.Errorf("client not found: %s", clientAddr)
 	}
 
-	// Close the command channel to signal the client to disconnect.
-	// The goroutine handling the client will clean up via defer when it receives the close.
-	close(cmdChan)
+	// Send EXIT command to make client gracefully shutdown
+	// The client will close its connection, triggering cleanup in handleClient
+	select {
+	case cmdChan <- protocol.CmdExit:
+		// EXIT command sent successfully
+	case <-time.After(time.Second):
+		// If we can't send EXIT (client already disconnecting), that's fine
+		return nil
+	}
 	return nil
 }
 

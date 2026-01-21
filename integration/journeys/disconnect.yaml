@@ -1,0 +1,48 @@
+name: "Client Disconnect Journey"
+description: "Test client disconnection via HTTP API and verify proper cleanup"
+default_timeout_ms: 15000
+
+steps:
+  - name: "verify client connected"
+    type: "command"
+    command: "curl -s http://gotsl:8081/clients | jq -r 'length'"
+    assertions:
+      - type: "contains"
+        expected: "1"
+        description: "verify one client is connected"
+
+  - name: "get client address"
+    type: "command"
+    command: "curl -s http://gotsl:8081/clients | jq -r '.[0].address'"
+    assertions:
+      - type: "contains"
+        expected: ":"
+        description: "verify client address format contains colon"
+
+  - name: "execute command before disconnect"
+    type: "command"
+    command: "echo 'test command' && whoami"
+    assertions:
+      - type: "contains"
+        expected: "root"
+        description: "verify command execution works before disconnect"
+
+  - name: "disconnect client via HTTP API"
+    type: "command"
+    command: |
+      CLIENT_ADDR=$(curl -s http://gotsl:8081/clients | jq -r '.[0].address')
+      curl -s -X POST http://gotsl:8081/disconnect \
+        -H 'Content-Type: application/json' \
+        -d "{\"client\": \"$CLIENT_ADDR\"}"
+    assertions:
+      - type: "contains"
+        expected: "disconnected"
+        description: "verify disconnect API call succeeded"
+
+  - name: "verify client disconnected"
+    type: "command"
+    command: "sleep 1 && curl -s http://gotsl:8081/clients | jq -r 'length'"
+    assertions:
+      - type: "contains"
+        expected: "0"
+        description: "verify no clients are connected after disconnect"
