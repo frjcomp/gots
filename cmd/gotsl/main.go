@@ -25,6 +25,7 @@ import (
 	"github.com/frjcomp/gots/pkg/protocol"
 	"github.com/frjcomp/gots/pkg/server"
 	"github.com/frjcomp/gots/pkg/version"
+	"golang.org/x/sys/unix"
 	"golang.org/x/term"
 )
 
@@ -831,7 +832,14 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 	// Give the terminal a moment to fully reset after raw mode is disabled.
 	// This is especially important when connecting to Windows shells which may
 	// have different line ending or buffering behavior.
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(200 * time.Millisecond)
+
+	// Ensure stdin is in a readable state: set it to blocking mode and clear any stale data.
+	// This is critical because the Windows PTY may have left stdin in an intermediate state.
+	// Only do this in TTY mode - in pipes (tests), this can cause blocking issues.
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		ensureStdinReadable()
+	}
 }
 
 // resetTerminal explicitly resets the terminal to a known good state after
@@ -839,17 +847,75 @@ func enterPtyShell(l server.ListenerInterface, clientAddr string, arbiter *conso
 // Windows, which may leave the terminal in an unusual state with corrupted
 // attributes or escape sequences not being processed properly.
 func resetTerminal() {
-	// Try to use stty to set terminal to a sane state.
+	// Only try this if stdin is a TTY (not in pipe/test mode)
+	if !term.IsTerminal(int(os.Stdin.Fd())) {
+		return
+	}
+
+	stdinFd := int(os.Stdin.Fd())
+
+	// First, try to use stty to set terminal to a sane state.
 	// This resets all terminal attributes and ensures escape sequences work.
 	cmd := exec.Command("stty", "sane")
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		// stty not available or failed, try ANSI reset sequence as fallback
-		// This sequence resets the terminal to default foreground/background colors
-		// and disables all special modes (bold, underline, reverse video, etc.)
-		fmt.Print("\033c")
+	_ = cmd.Run() // Ignore errors, stty may not be available
+
+	// Also try to get and set terminal attributes directly using tcgetattr/tcsetattr
+	// This ensures the terminal is in cooked mode with proper line buffering
+	t, err := term.GetState(stdinFd)
+	if err == nil {
+		// Just getting and restoring the state can help reset any corrupted flags
+		_ = term.Restore(stdinFd, t)
+	}
+
+	// Send ANSI reset sequence as final backup
+	// This resets the terminal to default foreground/background colors
+	// and disables all special modes (bold, underline, reverse video, etc.)
+	fmt.Print("\033c")
+}
+
+// ensureStdinReadable ensures stdin is in a readable state after PTY sessions.
+// Windows PTY sessions can leave stdin in a state where reads block indefinitely,
+// so we explicitly set non-blocking mode, drain any stale data, and return to blocking.
+func ensureStdinReadable() {
+	stdinFd := int(os.Stdin.Fd())
+
+	// First, ensure stdin is set to blocking mode with no read timeouts
+	// The PTY session may have set non-blocking mode or read deadlines
+	_ = os.Stdin.SetReadDeadline(time.Time{}) // Clear any deadline
+	_ = os.Stdin.SetWriteDeadline(time.Time{})
+
+	// Try to get current flags
+	flags, err := unix.FcntlInt(uintptr(stdinFd), unix.F_GETFL, 0)
+	if err != nil {
+		return // fcntl not available, skip
+	}
+
+	// Ensure stdin is in blocking mode (remove non-blocking flag if set)
+	if flags&unix.O_NONBLOCK != 0 {
+		// stdin is non-blocking, set it to blocking
+		_, _ = unix.FcntlInt(uintptr(stdinFd), unix.F_SETFL, flags&^unix.O_NONBLOCK)
+	}
+
+	// Now set non-blocking temporarily to drain any stale data without blocking
+	if _, err := unix.FcntlInt(uintptr(stdinFd), unix.F_SETFL, flags|unix.O_NONBLOCK); err != nil {
+		return
+	}
+	defer func() {
+		// Restore blocking mode
+		_, _ = unix.FcntlInt(uintptr(stdinFd), unix.F_SETFL, flags&^unix.O_NONBLOCK)
+	}()
+
+	// Drain any stale data from stdin (e.g., leftover from Windows shell output)
+	// This prevents stale data from interfering with readline
+	buf := make([]byte, 4096)
+	for {
+		n, err := os.Stdin.Read(buf)
+		if n == 0 || err != nil {
+			break // No more data or error (expected for non-blocking)
+		}
 	}
 }
 
