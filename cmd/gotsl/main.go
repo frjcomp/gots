@@ -386,11 +386,11 @@ func interactiveShell(l server.ListenerInterface, logRedirector *logRedirector, 
 			handleSocks(l, clientAddr, parts[2])
 		case "stop":
 			if len(parts) < 2 {
-				fmt.Println("Usage: stop forward <id> | stop socks <id>")
+				fmt.Println("Usage: stop forward <id> | stop socks <id> | stop client <id>")
 				continue
 			}
 			if len(parts) != 3 {
-				fmt.Println("Usage: stop forward <id> | stop socks <id>")
+				fmt.Println("Usage: stop forward <id> | stop socks <id> | stop client <id>")
 				continue
 			}
 			handleStop(l, parts[1], parts[2])
@@ -520,11 +520,11 @@ func interactiveShellBasic(l server.ListenerInterface, arbiter *console.SessionA
 			handleSocks(l, clientAddr, parts[2])
 		case "stop":
 			if len(parts) < 2 {
-				fmt.Println("Usage: stop forward <id> | stop socks <id>")
+				fmt.Println("Usage: stop forward <id> | stop socks <id> | stop client <id>")
 				continue
 			}
 			if len(parts) != 3 {
-				fmt.Println("Usage: stop forward <id> | stop socks <id>")
+				fmt.Println("Usage: stop forward <id> | stop socks <id> | stop client <id>")
 				continue
 			}
 			handleStop(l, parts[1], parts[2])
@@ -548,6 +548,7 @@ func printHelp() {
 	fmt.Println("  socks <id> <local_port>     - Start SOCKS5 proxy on local port through client")
 	fmt.Println("  stop forward <id>           - Stop a port forward by ID")
 	fmt.Println("  stop socks <id>             - Stop a SOCKS5 proxy by ID")
+	fmt.Println("  stop client <id>            - Disconnect a client")
 	fmt.Println("  exit                        - Exit the listener")
 	fmt.Println()
 	fmt.Println("Keyboard shortcuts:")
@@ -930,9 +931,9 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 			return suggestions, len(prefix)
 		}
 
-		// For "stop" command, complete with "forward" or "socks"
+		// For "stop" command, complete with "forward", "socks", or "client"
 		if cmd == "stop" && (len(parts) == 1 || (len(parts) == 2 && !strings.HasSuffix(lineStr, " "))) {
-			stopTargets := []string{"forward", "socks"}
+			stopTargets := []string{"forward", "socks", "client"}
 			prefix := ""
 			if len(parts) == 2 {
 				prefix = parts[1]
@@ -985,6 +986,25 @@ func (c *shellCompleter) Do(line []rune, pos int) (newLine [][]rune, length int)
 				}
 				return suggestions, len(prefix)
 			}
+		}
+
+		// For "stop client <id>" completion - complete with client IDs
+		if cmd == "stop" && len(parts) >= 2 && parts[1] == "client" && 
+			(len(parts) == 2 || (len(parts) == 3 && !strings.HasSuffix(lineStr, " "))) {
+			clients := c.listener.GetClients()
+			var suggestions [][]rune
+			prefix := ""
+			if len(parts) == 3 {
+				prefix = parts[2]
+			}
+
+			for i := range clients {
+				clientID := fmt.Sprintf("%d", i+1)
+				if strings.HasPrefix(clientID, prefix) {
+					suggestions = append(suggestions, []rune(clientID[len(prefix):]))
+				}
+			}
+			return suggestions, len(prefix)
 		}
 	}
 
@@ -1155,8 +1175,19 @@ func handleStop(l server.ListenerInterface, stopType, id string) {
 			} else {
 				fmt.Printf("✓ Stopped SOCKS proxy %s\n", id)
 			}
+		case "client":
+			clientAddr := getClientByID(l, id)
+			if clientAddr == "" {
+				return
+			}
+			err := l.DisconnectClient(clientAddr)
+			if err != nil {
+				fmt.Printf("Failed to disconnect client: %v\n", err)
+			} else {
+				fmt.Printf("✓ Disconnected client %s\n", id)
+			}
 		default:
-			fmt.Printf("Unknown stop type: %s (use 'forward' or 'socks')\n", stopType)
+			fmt.Printf("Unknown stop type: %s (use 'forward', 'socks', or 'client')\n", stopType)
 		}
 	} else {
 		fmt.Println("Error: could not access managers")

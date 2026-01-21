@@ -48,6 +48,10 @@ type ListenerInterface interface {
 
 	// IsAnyPtyModeActive checks if any client is currently in PTY mode.
 	IsAnyPtyModeActive() bool
+
+	// DisconnectClient forcefully disconnects a client by its address.
+	// Returns an error if the client is not found.
+	DisconnectClient(clientAddr string) error
 }
 
 // CommandHandler defines the interface for handling command execution on clients.

@@ -449,6 +449,22 @@ func (l *Listener) GetClientIdentifier(clientAddr string) string {
 	return l.clientIdentifiers[clientAddr]
 }
 
+// DisconnectClient forcefully disconnects a client by its address.
+func (l *Listener) DisconnectClient(clientAddr string) error {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+
+	cmdChan, exists := l.clientConnections[clientAddr]
+	if !exists {
+		return fmt.Errorf("client not found: %s", clientAddr)
+	}
+
+	// Close the command channel to signal the client to disconnect.
+	// The goroutine handling the client will clean up via defer when it receives the close.
+	close(cmdChan)
+	return nil
+}
+
 // GetClientMetadata returns metadata provided by the client (if any).
 func (l *Listener) GetClientMetadata(clientAddr string) (ClientMetadata, bool) {
 	l.mutex.Lock()

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -51,6 +52,15 @@ func (m *mockHeadlessListener) GetPtyDataChan(clientAddr string) (chan []byte, b
 }
 func (m *mockHeadlessListener) IsAnyPtyModeActive() bool {
 	return false
+}
+func (m *mockHeadlessListener) DisconnectClient(clientAddr string) error {
+	for i, addr := range m.clients {
+		if addr == clientAddr {
+			m.clients = append(m.clients[:i], m.clients[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("client not found")
 }
 func (m *mockHeadlessListener) GetForwardManager() forwardManager {
 	return m.fm

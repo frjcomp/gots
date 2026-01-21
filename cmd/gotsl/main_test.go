@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -236,6 +237,16 @@ func (m *mockListener) GetClientMetadata(clientAddr string) (server.ClientMetada
 	}
 	meta, ok := m.metadata[clientAddr]
 	return meta, ok
+}
+
+func (m *mockListener) DisconnectClient(clientAddr string) error {
+	for i, addr := range m.clients {
+		if addr == clientAddr {
+			m.clients = append(m.clients[:i], m.clients[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("client not found")
 }
 
 func TestListClientsIncludesIdentifiers(t *testing.T) {
